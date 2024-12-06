@@ -8,5 +8,6 @@
 
 ### 测试
 - build.sh：编译构建测试用例
-- echoserver_perftest.sh：EchoServer性能测试脚本，压力测试模式下RTT延迟最大约6000ns，轻量负载下RTT延迟根据payload大小变化，100ns-600ns，需要每次编译构建前修改PackMessage的大小。
+- perftest.sh：性能测试脚本，RTT延迟根据payload大小变化，100ns-600ns，需要每次编译构建前修改PackMessage的大小。
+- echoserver_benchmark.sh：EchoServer压力测试脚本，RTT延迟最大约6000ns。
 - pubserver_test.sh：PubServer测试脚本

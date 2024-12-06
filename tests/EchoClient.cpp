@@ -16,7 +16,7 @@ inline unsigned long long GetCurrentTimeNs()
 
 struct PackMessage
 {
-    char data[500];
+    char data[1024];
 };
 
 
@@ -38,17 +38,17 @@ public:
     {
     }
 
-    void Run()
+    void Run(const std::string& ServerName)
     {
-        if(!m_Client.Connect("EchoServer"))
+        if(!m_Client.Connect(ServerName))
         {
-            printf("%s connect to EchoServer failed\n", m_ClientName.c_str());
+            printf("%s connect to %s failed\n", m_ClientName.c_str(), ServerName.c_str());
             return ;
         }
         m_Client.Reset();
         usleep(1000);
         m_ChannelID = m_Client.ChannelID();
-        printf("%s connect to EchoServer success, ChannelID:%d\n", m_ClientName.c_str(), m_ChannelID);
+        printf("%s connect to %s success, ChannelID:%d\n", m_ClientName.c_str(), ServerName.c_str(), m_ChannelID);
         m_pSendThread = new std::thread(&EchoClient::SendWorkFunc, this);
         m_pRecvThread = new std::thread(&EchoClient::RecvWorkFunc, this);
         m_pSendThread->join();
@@ -104,18 +104,18 @@ private:
 
 int main(int argc, char* argv[]) 
 {
-    if(argc < 4)
+    if(argc < 5)
     {
-        printf("Usage: %s <ClientName>\n", argv[0]);
+        printf("Usage: %s <ClientName> <ServerName> <cpuid> <cpuid>\n", argv[0]);
         return -1;
     }
     
     std::vector<int> items;
-    items.push_back(std::stoi(argv[2]));
     items.push_back(std::stoi(argv[3]));
+    items.push_back(std::stoi(argv[4]));
     EchoClient client(argv[1], items);
     uint64_t start = GetCurrentTimeNs();
-    client.Run();
+    client.Run(argv[2]);
     uint64_t end = GetCurrentTimeNs();
     double latency = (end - start) / N;
     printf("recv Msg: %d latency:%.2f ns\n", N, latency);

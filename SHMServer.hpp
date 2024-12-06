@@ -19,6 +19,7 @@ class SHMServer
 public:
     SHMServer(const std::string& ServerName, const std::vector<int>& CPU_List)
     {
+        m_AllChannel = nullptr;
         m_pInternalThread = nullptr;
         m_pWorkThread = nullptr;
         m_CPU_List = CPU_List;
@@ -51,19 +52,21 @@ protected:
     void InitChannel(const std::string& ServerName)
     {
         std::string shm_file = std::string("/") + ServerName + ".shm";
-        if(!m_AllChannel) 
+        m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
+        if(m_AllChannel) 
         {
-            m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
-            if(m_AllChannel) 
+            for(int i = 0; i < Conf::ChannelSize; i++)
             {
-                for(int i = 0; i < Conf::ChannelSize; i++)
-                {
-                    m_AllChannel[i].ChannelID = i;
-                    m_AllChannel[i].SendQueue.Reset();
-                    m_AllChannel[i].RecvQueue.Reset();
-                    printf("SHMServer Init Channel:%d\n", i);
-                }
+                m_AllChannel[i].ChannelID = i;
+                m_AllChannel[i].SendQueue.Reset();
+                m_AllChannel[i].RecvQueue.Reset();
+                fprintf(stdout, "SHMServer Init Channel:%d 0X%p\n", i, &m_AllChannel[i]);
             }
+            fprintf(stdout, "SHMServer Init done %.2f MB\n", sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+        }
+        else
+        {
+            fprintf(stderr, "SHMServer Init Channel failed\n");
         }
     }
 
@@ -85,7 +88,7 @@ protected:
     {
         // 绑定线程
         bool ret = ThreadBind(pthread_self(), m_CPU_List.at(0));
-        printf("SHMServer InternalThread bind to cpu:%d ret=%d\n", m_CPU_List.at(0), ret);
+        fprintf(stdout, "SHMServer InternalThread bind to cpu:%d ret=%d\n", m_CPU_List.at(0), ret);
         while(!m_Stopped) 
         {
             PollMsg();
@@ -98,7 +101,7 @@ protected:
     {
         // 绑定线程
         bool ret = ThreadBind(pthread_self(), m_CPU_List.at(1));
-        printf("SHMServer WorkThread bind to cpu:%d ret=%d\n", m_CPU_List.at(1), ret);
+        fprintf(stdout, "SHMServer WorkThread bind to cpu:%d ret=%d\n", m_CPU_List.at(1), ret);
         WorkFunc();
     }
 
@@ -120,7 +123,7 @@ protected:
                         bool ret = m_AllChannel[i].SendQueue.Push(m_Msg);
                         if(!ret)
                         {
-                            printf("SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
+                            fprintf(stderr, "SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
                         }
                     }
                 }
@@ -141,7 +144,7 @@ protected:
                     bool ret = m_RecvQueue.Push(m_Msg);
                     if(!ret)
                     {
-                        printf("SHMServer m_RecvQueue full, misss Msg:%u\n", m_Msg.MsgID);
+                        fprintf(stderr, "SHMServer m_RecvQueue full, misss Msg:%u\n", m_Msg.MsgID);
                     }
                 }
             }
@@ -156,7 +159,7 @@ protected:
                         bool ret = m_AllChannel[m_Msg.ChannelID].SendQueue.Push(m_Msg);
                         if(!ret)
                         {
-                            printf("SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_Msg.ChannelID, m_Msg.MsgID);
+                            fprintf(stderr, "SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_Msg.ChannelID, m_Msg.MsgID);
                         }
                     }
                 }

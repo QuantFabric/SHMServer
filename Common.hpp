@@ -15,7 +15,7 @@ namespace SHMIPC{
 struct CommonConf
 {
     static const uint32_t NameSize = 32;
-    static const uint32_t ShmQueueSize = 1024 * 16; 
+    static const uint32_t ShmQueueSize = 1024 * 8; 
     static const uint32_t ChannelSize = 8;
 };
 

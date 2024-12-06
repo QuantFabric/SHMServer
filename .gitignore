@@ -1,5 +1,6 @@
 /build
 /tests/log
+/tests/build
 /*.log
 /tests/EchoServer
 /tests/EchoClient

@@ -49,6 +49,7 @@ public:
                         m_Channel->SendQueue.Reset();
                         m_Channel->RecvQueue.Reset();
                         ret = true;
+                        fprintf(stdout, "SHMConnection Register new Channel:%d success, ClientName: %s\n", i, m_ClientName);
                         break;
                     }
                     else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
@@ -58,9 +59,11 @@ public:
                         m_Channel->SendQueue.Reset();
                         m_Channel->RecvQueue.Reset();
                         ret = true;
+                        fprintf(stdout, "SHMConnection Register exist Channel:%d success, ClientName: %s\n", i, m_ClientName);
                         break;
                     }
                 }
+                fprintf(stdout, "SHMConnection Init done %.2f MB\n", sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
             }
         }
         return ret;

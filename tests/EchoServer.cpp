@@ -9,7 +9,7 @@ struct ServerConf : public SHMIPC::CommonConf
 
 struct PackMessage
 {
-    char data[500];
+    char data[1024];
 };
 
 
@@ -38,12 +38,11 @@ public:
                 bool ret = m_SendQueue.Push(msg);
                 if(!ret)
                 {
-                    printf("EchoServer m_SendQueue full, misss Msg:%u\n", msg.MsgID);
+                    fprintf(stderr, "EchoServer m_SendQueue full, misss Msg:%u\n", msg.MsgID);
                 }
             }
         }
     }
-
 };
 
 

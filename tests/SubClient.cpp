@@ -9,7 +9,7 @@
 
 struct PackMessage
 {
-    char data[500];
+    char data[1000];
 };
 
 

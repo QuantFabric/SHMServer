@@ -9,15 +9,15 @@ struct ServerConf : public SHMIPC::CommonConf
 
 struct PackMessage
 {
-    char data[1024];
+    uint64_t MsgID;
+    char data[100];
+    uint64_t TimeStamp;
 };
 
-
-
-class EchoServer : public SHMIPC::SHMServer<SHMIPC::ChannelMsg<PackMessage>, ServerConf>
+class EchoServer : public SHMIPC::SHMServer<PackMessage, ServerConf>
 {
 public:
-    EchoServer(const std::string& ServerName, const std::vector<int>& items):SHMServer<SHMIPC::ChannelMsg<PackMessage>, ServerConf>(ServerName, items)
+    EchoServer():SHMServer<PackMessage, ServerConf>()
     {
 
     }
@@ -27,38 +27,35 @@ public:
 
     }
 
-    void WorkFunc()
+    void HandleMsg()
     {
-        SHMIPC::ChannelMsg<PackMessage> msg;
+        static SHMIPC::ChannelMsg<PackMessage> msg;
         while(true)
         {
             // 将接收客户端消息发送回客户端
             if(m_RecvQueue.Pop(msg))
             {
-                bool ret = m_SendQueue.Push(msg);
-                if(!ret)
-                {
-                    fprintf(stderr, "EchoServer m_SendQueue full, misss Msg:%u\n", msg.MsgID);
-                }
+                while(!m_SendQueue.Push(msg));
+            }
+            else
+            {
+                break;
             }
         }
     }
 };
 
-
 int main(int argc, char* argv[]) 
 {
-    if(argc < 4)
+    if(argc < 3)
     {
-        printf("Usage: %s <ServerName>\n", argv[0]);
+        printf("Usage: %s <ServerName> <cpuid>\n", argv[0]);
         return -1;
     }
     
-    std::vector<int> items;
-    items.push_back(std::stoi(argv[2]));
-    items.push_back(std::stoi(argv[3]));
-    EchoServer server(argv[1], items);
-    server.Run();
+    EchoServer server;
+    server.Start(argv[1], std::stoi(argv[2]));
+    server.Join();
     return 0;
 }
 // g++ -std=c++17 -O3 -o EchoServer EchoServer.cpp -lpthread -lrt

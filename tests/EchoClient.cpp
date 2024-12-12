@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 #include <thread>
+#include <algorithm>
+#include <numeric>
+#include <math.h>
 
 inline unsigned long long GetCurrentTimeNs() 
 {
@@ -16,91 +19,64 @@ inline unsigned long long GetCurrentTimeNs()
 
 struct PackMessage
 {
-    char data[1024];
+    uint64_t MsgID;
+    char data[100];
+    uint64_t TimeStamp;
 };
 
-
 const uint64_t N = 10000000;
+
 
 class EchoClient 
 {
 public:
-    EchoClient(const std::string& ClientName, const std::vector<int>& items):m_Client(ClientName)
+    EchoClient(const std::string& ClientName):m_Client(ClientName)
     {
-        m_pSendThread = nullptr;
-        m_pRecvThread = nullptr;
-        m_ChannelID = -1;
-        m_ClientName = ClientName;
-        m_CPU_List = items;
+        m_pWorkThread = nullptr;
     }
 
     virtual ~EchoClient()
     {
     }
 
-    void Run(const std::string& ServerName)
+    void Start(const std::string& ServerName, int32_t CPU0, int32_t CPU1)
     {
-        if(!m_Client.Connect(ServerName))
-        {
-            printf("%s connect to %s failed\n", m_ClientName.c_str(), ServerName.c_str());
-            return ;
-        }
-        m_Client.Reset();
+        m_CPU = CPU1;
+        m_Client.Start(ServerName, CPU0);
         usleep(1000);
-        m_ChannelID = m_Client.ChannelID();
-        printf("%s connect to %s success, ChannelID:%d\n", m_ClientName.c_str(), ServerName.c_str(), m_ChannelID);
-        m_pSendThread = new std::thread(&EchoClient::SendWorkFunc, this);
-        m_pRecvThread = new std::thread(&EchoClient::RecvWorkFunc, this);
-        m_pSendThread->join();
-        m_pRecvThread->join();
+        
+        m_pWorkThread = new std::thread(&EchoClient::WorkFunc, this);
+        m_pWorkThread->join();
     }
 protected:
-
-    void SendWorkFunc()
+    void WorkFunc()
     {
-        bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPU_List.at(0));
-        printf("%s start SendWorkFunc thread, ChannelID:%d, CPU:%d ret:%d\n", m_ClientName.c_str(), m_ChannelID, m_CPU_List.at(0), ret);
-        int64_t i = 0;
-        SHMIPC::ChannelMsg<PackMessage> msg;
-        while(i < N)
+        bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPU);
+        printf("%s start WorkFunc thread, CPU:%d ret=%d\n", m_ClientName.c_str(), m_CPU, ret);
+        PackMessage sendMsg, recvMsg;
+        sendMsg.MsgID = 0;
+        recvMsg.MsgID = 0;
+        uint64_t latency = 0;
+        while(recvMsg.MsgID < N)
         {
-            msg.MsgID = i;
-            msg.ChannelID = m_ChannelID;
-            // msg.timestamp = GetCurrentTimeNs();
-            if(m_Client.Push(msg))
+            if(sendMsg.MsgID < N && m_Client.Push(sendMsg))
             {
-                i++;
-                // printf("send Msg: %05d \n", msg.MsgID);
+                sendMsg.MsgID++;
+            }
+            if(recvMsg.MsgID < N && m_Client.Pop(recvMsg))
+            {
+                recvMsg.MsgID++;
             }
         }
-        printf("%s excute SendWorkFunc done, ChannelID:%d MsdID:%d i=%d\n", m_ClientName.c_str(), m_ChannelID, msg.MsgID, i);
-    }
-
-    void RecvWorkFunc()
-    {
-        bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPU_List.at(1));
-        printf("%s start RecvWorkFunc thread, ChannelID:%d CPU:%d ret:%d\n", m_ClientName.c_str(), m_ChannelID, m_CPU_List.at(1), ret);
-        uint64_t i = 0;
-        SHMIPC::ChannelMsg<PackMessage> msg;
-        msg.MsgID = 0;
-        while(i < N)
-        {
-            if(m_Client.Pop(msg))
-            {
-                // printf("recv Msg: %05d %u\n", msg.MsgID, i);
-                i++;
-            } 
-        }
-        printf("%s excute RecvWorkFunc done, ChannelID:%d MsdID:%d i=%d\n", m_ClientName.c_str(), m_ChannelID, msg.MsgID, i);
+        printf("%s execute WorkFunc thread done %u\n", m_ClientName.c_str(), latency);
     }
 private:
-    SHMIPC::SHMConnection<SHMIPC::ChannelMsg<PackMessage>, SHMIPC::CommonConf> m_Client;
-    std::thread* m_pSendThread;
-    std::thread* m_pRecvThread;
-    int32_t m_ChannelID;
+    SHMIPC::SHMConnection<PackMessage, SHMIPC::CommonConf> m_Client;
+    std::thread* m_pWorkThread;
     std::string m_ClientName;
-    std::vector<int> m_CPU_List;
+    int32_t m_CPU;
 };
+
 
 int main(int argc, char* argv[]) 
 {
@@ -109,17 +85,14 @@ int main(int argc, char* argv[])
         printf("Usage: %s <ClientName> <ServerName> <cpuid> <cpuid>\n", argv[0]);
         return -1;
     }
-    
-    std::vector<int> items;
-    items.push_back(std::stoi(argv[3]));
-    items.push_back(std::stoi(argv[4]));
-    EchoClient client(argv[1], items);
+    EchoClient client(argv[1]);
     uint64_t start = GetCurrentTimeNs();
-    client.Run(argv[2]);
+    client.Start(argv[2], std::atoi(argv[3]), std::atoi(argv[4]));
+
     uint64_t end = GetCurrentTimeNs();
-    double latency = (end - start) / N;
+    double latency = 1.0 * (end - start) / N;
     printf("recv Msg: %d latency:%.2f ns\n", N, latency);
-    
+
     return 0;
 }
-// g++ -std=c++11 -O3 -o EchoClient EchoClient.cpp -lpthread -lrt
+// g++ -std=c++17 -O3 -o EchoClient EchoClient.cpp -lpthread -lrt

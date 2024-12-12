@@ -17,11 +17,23 @@ struct CommonConf
     static const uint32_t NameSize = 32;
     static const uint32_t ShmQueueSize = 1024 * 8; 
     static const uint32_t ChannelSize = 8;
+    static const uint64_t Heartbeat_Interval = 5 * 60 * 1000 * 1000 * 1000UL;
+};
+
+
+enum MsgType
+{
+    MSG_TYPE_DATA = 0,
+    MSG_TYPE_LOGIN = 1,
+    MSG_TYPE_SERVER_ACK = 2,
+    MSG_TYPE_CLIENT_ACK = 3,
+    MSG_TYPE_HEARTBEAT = 10,
 };
 
 template <class T>
 struct ChannelMsg
 {
+    uint32_t MsgType;
     uint64_t MsgID;
     uint64_t TimeStamp;
     int32_t ChannelID;
@@ -68,6 +80,19 @@ static bool ThreadBind(pthread_t thread, int cpuid)
     CPU_SET(cpuid, &mask);
     return pthread_setaffinity_np(thread, sizeof(mask), &mask) == 0;
 }
+
+static inline uint64_t RDTSC() 
+{
+    static uint32_t hi, lo;
+    __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
+    return ( (uint64_t)lo) | (((uint64_t)hi) << 32);
+}
+
+    static inline uint64_t RDTSCP() 
+    {
+        unsigned int d = 0;
+        return __builtin_ia32_rdtscp(&d);
+    }
 
 } // namespace SHMIPC
 

@@ -9,15 +9,17 @@ struct ServerConf : public SHMIPC::CommonConf
 
 struct PackMessage
 {
-    char data[1000];
+    uint64_t MsgID;
+    char data[100];
+    uint64_t TimeStamp;
 };
 
 
 
-class PubServer : public SHMIPC::SHMServer<SHMIPC::ChannelMsg<PackMessage>, ServerConf>
+class PubServer : public SHMIPC::SHMServer<PackMessage, ServerConf>
 {
 public:
-    PubServer(const std::string& ServerName, const std::vector<int>& items):SHMServer<SHMIPC::ChannelMsg<PackMessage>, ServerConf>(ServerName, items)
+    PubServer():SHMServer<PackMessage, ServerConf>()
     {
 
     }
@@ -27,22 +29,16 @@ public:
 
     }
 
-    void WorkFunc()
+    void HandleMsg()
     {
-        SHMIPC::ChannelMsg<PackMessage> msg;
-        uint64_t i = 0;
-        while(true)
-        {   
-            // 模拟接收行情数据
-            for(int j = 0; j < 100; j++)
-            {
-                msg.MsgID = i++;
-                if(!m_SendQueue.Push(msg))
-                {
-                    printf("PubServer m_SendQueue full miss Msg:%u\n", msg.MsgID);
-                }
-            }
-            usleep(500*1000);// 间隔500ms
+        usleep(500*1000);// 间隔500ms
+        static SHMIPC::ChannelMsg<PackMessage> msg;
+        static uint64_t i = 0;
+        // 模拟接收行情数据
+        for(int j = 0; j < 100; j++)
+        {
+            msg.Data.MsgID = i++;
+            while(!m_SendQueue.Push(msg));
         }
     }
 };
@@ -50,17 +46,15 @@ public:
 
 int main(int argc, char* argv[]) 
 {
-    if(argc < 4)
+    if(argc < 2)
     {
         printf("Usage: %s <ServerName>\n", argv[0]);
         return -1;
     }
     
-    std::vector<int> items;
-    items.push_back(std::stoi(argv[2]));
-    items.push_back(std::stoi(argv[3]));
-    PubServer server(argv[1], items);
-    server.Run();
+    PubServer server;
+    server.Start(argv[1]);
+    server.Join();
     return 0;
 }
 

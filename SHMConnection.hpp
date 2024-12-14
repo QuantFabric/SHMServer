@@ -6,9 +6,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
-
-#include "SPSCQueue.hpp"
 #include "Common.hpp"
+#include "SPSCQueue.hpp"
+#include "MPMCQueue.hpp"
 
 namespace SHMIPC {
 
@@ -24,6 +24,9 @@ public:
         strncpy(m_ClientName, clientName.c_str(), sizeof(m_ClientName) - 1);
         m_ClientName[sizeof(m_ClientName) - 1] = 0;
 
+        m_SendQueue.Reset();
+        m_RecvQueue.Reset();
+
         m_pWorkThread = nullptr;
         m_ChannelID = -1;
         m_LoginMsg.MsgType = MsgType::MSG_TYPE_LOGIN;
@@ -38,13 +41,14 @@ public:
 
     void Start(const std::string& ServerName, int32_t CPUID=-1)
     {
+        m_ServerName = ServerName;
         m_CPUID = CPUID;
         if(!Connect(ServerName))
         {
             fprintf(stderr, "SHMConnection::Start %s connect to %s failed\n", m_ClientName, ServerName.c_str());
             return ;
         }
-        fprintf(stdout, "SHMConnection::Start %s connect to %s success ChannelID:%d\n", m_ClientName, ServerName.c_str(), m_ChannelID);
+        fprintf(stdout, "SHMConnection::Start %s connect to %s success by ChannelID:%d\n", m_ClientName, ServerName.c_str(), m_ChannelID);
         Reset();
         usleep(1000);
         m_LoginMsg.ChannelID = m_ChannelID;
@@ -52,7 +56,7 @@ public:
         m_DataMsg.ChannelID = m_ChannelID;
         // 发送登录请求
         m_Channel->SendQueue.Push(m_LoginMsg);
-        fprintf(stderr, "SHMConnection::Start %s send LOGIN to ChannelID:%d\n", m_ClientName, m_ChannelID);
+        fprintf(stderr, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         m_pWorkThread = new std::thread(&SHMConnection::WorkFunc, this);
     }
 
@@ -82,10 +86,9 @@ protected:
                     {
                         m_Channel = &m_AllChannel[i];
                         strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
-                        m_Channel->ChannelID = i;
                         m_Channel->SendQueue.Reset();
                         m_Channel->RecvQueue.Reset();
-                        m_ChannelID = i;
+                        m_ChannelID = m_Channel->ChannelID;
                         ret = true;
                         fprintf(stdout, "SHMConnection:%s new Channel:%d success, ClientName: %s\n", ServerName.c_str(), i, m_ClientName);
                         break;
@@ -93,10 +96,9 @@ protected:
                     else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
                     {
                         m_Channel = &m_AllChannel[i];
-                        m_Channel->ChannelID = i;
                         m_Channel->SendQueue.Reset();
                         m_Channel->RecvQueue.Reset();
-                        m_ChannelID = i;
+                        m_ChannelID = m_Channel->ChannelID;
                         ret = true;
                         fprintf(stdout, "SHMConnection:%s exist Channel:%d success, ClientName: %s\n", ServerName.c_str(), i, m_ClientName);
                         break;
@@ -104,11 +106,11 @@ protected:
                 }
                 if(ret)
                 {
-                    fprintf(stdout, "SHMConnection %s connect to SHMServer:%s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+                    fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
                 }
                 else
                 {
-                    fprintf(stderr, "SHMConnection %s connect to SHMServer:%s failed\n", m_ClientName, ServerName.c_str());
+                    fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
                 }
             }
         }
@@ -127,42 +129,43 @@ protected:
             // 发送数据
             if(m_SendQueue.Pop(m_DataMsg.Data))
             {
-                while(!m_Channel->SendQueue.Push(m_DataMsg));
                 TimeStamp = RDTSC();
-                // if(m_Channel->SendQueue.Push(m_DataMsg))
-                // {
-                //     // 发送消息时更新时间戳
-                //     TimeStamp = RDTSC();
-                //     // fprintf(stdout, "SHMConnection::WorkFunc %s send msg to Channel:%d success\n", m_ClientName, m_ChannelID);
-                // }
-                // else
-                // {
-                //     fprintf(stderr, "SHMConnection::WorkFunc %s send msg to Channel:%d fail\n", m_ClientName, m_ChannelID);
-                // }
+                if(m_Channel->SendQueue.Push(m_DataMsg))
+                {
+                    // 发送消息时更新时间戳
+                    TimeStamp = RDTSC();
+                    // fprintf(stdout, "SHMConnection::WorkFunc %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                }
+                else
+                {
+                    fprintf(stderr, "SHMConnection::WorkFunc %s send msg to %s failed by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                }
             }
             // 接收数据
             if(m_Channel->RecvQueue.Pop(msg))
             {
                 if(MsgType::MSG_TYPE_DATA == msg.MsgType)
                 {
-                    while(!m_RecvQueue.Push(msg.Data));
-                    // fprintf(stdout, "SHMConnection::WorkFunc %s recv msg from Channel:%d\n", m_ClientName, m_ChannelID);
+                    if(!m_RecvQueue.Push(msg.Data))
+                    {
+                        fprintf(stderr, "SHMConnection::WorkFunc %s recv msg from %s failed m_RecvQueue full\n", m_ClientName, m_ServerName.c_str());
+                    }
                 }
                 else if(MsgType::MSG_TYPE_SERVER_ACK == msg.MsgType)
                 {
-                    fprintf(stdout, "SHMConnection::WorkFunc %s recv ACK from SHMServer\n", m_ClientName);
+                    fprintf(stdout, "SHMConnection::WorkFunc %s recv ACK from %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
                     msg.MsgType = MsgType::MSG_TYPE_CLIENT_ACK;
                     msg.ChannelID = m_ChannelID;
                     m_Channel->SendQueue.Push(msg);
-                    fprintf(stdout, "SHMConnection::WorkFunc %s send ACK to Channel:%d\n", m_ClientName, m_ChannelID);
+                    fprintf(stdout, "SHMConnection::WorkFunc %s send ACK to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
                 }
             } 
             // 超时发送心跳包
-            if(TimeStamp + Conf::Heartbeat_Interval - 10e9 < RDTSC())
+            if(m_Channel->IsConnected && (TimeStamp + Conf::Heartbeat_Interval - 10e9 < RDTSC()))
             {
                 TimeStamp = RDTSC();
                 m_Channel->SendQueue.Push(m_HeartBeatMsg);
-                fprintf(stdout, "SHMConnection::WorkFunc %s send heartbeat to Channel:%d\n", m_ClientName, m_ChannelID);
+                fprintf(stdout, "SHMConnection::WorkFunc %s send heartbeat to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
             }
         }
     }
@@ -184,14 +187,16 @@ protected:
             m_Channel->SendQueue.Reset();
             m_Channel->RecvQueue.Reset();
         }
+        m_SendQueue.Reset();
+        m_RecvQueue.Reset();
     }
 public:
-    static SPSCQueue<T, Conf::ShmQueueSize> m_SendQueue;
-    static SPSCQueue<T, Conf::ShmQueueSize> m_RecvQueue;
+    SPSCQueue<T, Conf::ShmQueueSize> m_SendQueue;
+    SPSCQueue<T, Conf::ShmQueueSize> m_RecvQueue;
 private:
     char m_ClientName[Conf::NameSize];
     int32_t m_ChannelID;
-
+    std::string m_ServerName;
     using SHMQ = SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize>;
     typedef struct
     {
@@ -211,11 +216,6 @@ private:
     ChannelMsg<T> m_DataMsg;
     int32_t m_CPUID;
 };
-
-template <class T, class Conf> 
-SPSCQueue<T, Conf::ShmQueueSize> SHMConnection<T, Conf>::m_SendQueue;
-template <class T, class Conf> 
-SPSCQueue<T, Conf::ShmQueueSize> SHMConnection<T, Conf>::m_RecvQueue;
 
 } // namespace SHMIPC
 

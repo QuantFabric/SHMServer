@@ -21,11 +21,13 @@ public:
     {
         m_AllChannel = nullptr;
         m_pInternalThread = nullptr;
+        m_MsgID = 1;
     }
 
     virtual ~SHMServer() 
     {
         Stop();
+        Release();
     }
 
     void Start(const std::string& ServerName, int32_t CPUID=-1)
@@ -34,11 +36,52 @@ public:
         // 初始化共享内存
         InitChannel(ServerName);
         // 注册信号
+        signal(SIGKILL, SHMServer::SignalHandler);
         signal(SIGTERM, SHMServer::SignalHandler);
-        // 启动线程
-        fprintf(stdout, "Start SHMServer InternalThread Publish:%d\n", Conf::Publish);
-        m_pInternalThread = new std::thread(&SHMServer::WorkFunc, this);
-        
+        signal(SIGINT, SHMServer::SignalHandler);
+        // 开启性能模式
+        if constexpr (Conf::Performance)
+        {
+            // 启动线程
+            fprintf(stdout, "Start SHMServer InternalThread Publish:%d\n", Conf::Publish);
+            fflush(stdout); 
+            fflush(stderr);
+            m_pInternalThread = new std::thread(&SHMServer::WorkFunc, this);
+        }
+        else
+        {
+            WorkFunc();
+            fflush(stdout); 
+            fflush(stderr);
+        }
+    }
+
+    bool Push(const T& msg)
+    {
+        static TChannelMsg<T> Msg;
+        Msg.ChannelID = msg.ChannelID;
+        Msg.MsgType = EMsgType::EMSG_TYPE_DATA;
+        Msg.TimeStamp = RDTSC();
+        memcpy(&Msg.Data, &msg, sizeof(T));
+        return m_SendQueue.Push(Msg);
+    }
+
+    bool Pop(T& msg)
+    {
+        static TChannelMsg<T> Msg;
+        bool ret = m_RecvQueue.Pop(Msg);
+        if(ret && EMsgType::EMSG_TYPE_DATA == Msg.MsgType)
+        {
+            memcpy(&msg, &Msg.Data, sizeof(T));
+            msg.ChannelID = Msg.ChannelID;
+            msg.TimeStamp = Msg.TimeStamp;
+        }
+        return ret;
+    }
+
+    void Stop() 
+    {
+        m_Stopped = true;
     }
 
     void Join()
@@ -49,20 +92,9 @@ public:
         }
     }
 
-    bool Push(const ChannelMsg<T>& Msg)
+    virtual void HandleMsg()
     {
-        return m_SendQueue.Push(Msg);
-    }
 
-    bool Pop(ChannelMsg<T>& Msg)
-    {
-        return m_RecvQueue.Pop(Msg);
-    }
-
-    void Stop() 
-    {
-        m_Stopped = true;
-        Release();
     }
 protected:
     void InitChannel(const std::string& ServerName)
@@ -94,6 +126,11 @@ protected:
             shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
             m_AllChannel = nullptr;
         }
+        if(m_pInternalThread)
+        {
+            delete m_pInternalThread;
+            m_pInternalThread = nullptr;
+        }
     }
 
     static void SignalHandler(int s) 
@@ -103,9 +140,13 @@ protected:
 
     void WorkFunc()
     {
-        // 绑定CPU
-        bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
-        fprintf(stdout, "SHMServer::WorkFunc InternalThread bind to CPU:%d, ret=%d\n", m_CPUID, ret);
+        // 开启性能模式
+        if constexpr (Conf::Performance)
+        {
+            // 绑定CPU
+            bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
+            fprintf(stdout, "SHMServer::WorkFunc InternalThread bind to CPU:%d, ret=%d\n", m_CPUID, ret);
+        }
         while(!m_Stopped) 
         {
             PollMsg();
@@ -126,15 +167,19 @@ protected:
                 bool ret = m_SendQueue.Pop(m_Msg);
                 if(ret)
                 {
+                    m_Msg.MsgID = m_MsgID++;
                     for(uint16_t i = 0; i < Conf::ChannelSize; i++) 
                     {
                         if(m_AllChannel[i].IsConnected)
                         {
-                            // while(!m_AllChannel[i].SendQueue.Push(m_Msg));
                             bool ret = m_AllChannel[i].SendQueue.Push(m_Msg);
-                            if(!ret)
+                            if(ret)
                             {
-                                fprintf(stderr, "SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
+                                m_AllChannel[i].TimeStamp = RDTSC();
+                            }
+                            else
+                            {
+                                fprintf(stderr, "SHMServer Channel:%d ChannelName:%s SendQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
                             }
                         }
                     }
@@ -149,24 +194,26 @@ protected:
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
+                    m_Msg.MsgID = m_MsgID++;
                     m_AllChannel[i].TimeStamp = RDTSC();
-                    if(MsgType::MSG_TYPE_LOGIN == m_Msg.MsgType)
+                    if(EMsgType::EMSG_TYPE_LOGIN == m_Msg.MsgType)
                     {
-                        fprintf(stdout, "SHMServer recv LOGIN from Channnel:%d\n", m_AllChannel[i].ChannelID);
-                        ChannelMsg<T> ServerACKMsg;
-                        ServerACKMsg.MsgType = MsgType::MSG_TYPE_SERVER_ACK;
+                        fprintf(stdout, "SHMServer recv LOGIN from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
+                        TChannelMsg<T> ServerACKMsg;
+                        ServerACKMsg.MsgType = EMsgType::EMSG_TYPE_SERVER_ACK;
+                        ServerACKMsg.MsgID = m_MsgID++;
                         ServerACKMsg.ChannelID = m_AllChannel[i].ChannelID;
                         m_AllChannel[i].SendQueue.Push(ServerACKMsg);
-                        fprintf(stdout, "SHMServer send Server ACK to Channnel:%d\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer send SERVER_ACK to Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
-                    else if(MsgType::MSG_TYPE_CLIENT_ACK == m_Msg.MsgType)
+                    else if(EMsgType::EMSG_TYPE_CLIENT_ACK == m_Msg.MsgType)
                     {
                         m_AllChannel[i].IsConnected = true;
-                        fprintf(stdout, "SHMServer recv ACK from Channnel:%d\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer recv CLIENT_ACK from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
-                    else if(MsgType::MSG_TYPE_HEARTBEAT == m_Msg.MsgType)
+                    else if(EMsgType::EMSG_TYPE_HEARTBEAT == m_Msg.MsgType)
                     {
-                        fprintf(stdout, "SHMServer HeartBeat from Channnel:%d\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer recv HEARTBEAT from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
                 else
@@ -175,7 +222,7 @@ protected:
                     if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
                     {
                         m_AllChannel[i].IsConnected = false;
-                        fprintf(stderr, "SHMServer Channnel:%d disconnect\n", m_AllChannel[i].ChannelID);
+                        fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
             }
@@ -188,34 +235,34 @@ protected:
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
+                    m_Msg.MsgID = m_MsgID++;
                     m_AllChannel[i].TimeStamp = RDTSC();
-                    if(MsgType::MSG_TYPE_DATA == m_Msg.MsgType)
+                    if(EMsgType::EMSG_TYPE_DATA == m_Msg.MsgType)
                     {
-                        while(!m_RecvQueue.Push(m_Msg));
-                        // bool ret = m_RecvQueue.Push(m_Msg);
-                        // if(!ret)
-                        // {
-                        //     fprintf(stderr, "SHMServer m_RecvQueue full, misss Msg:%u\n", m_Msg.MsgID);
-                        // }
-                        // fprintf(stdout, "SHMServer recv Data from Channnel:%d\n", m_AllChannel[i].ChannelID);
+                        bool ret = m_RecvQueue.Push(m_Msg);
+                        if(!ret)
+                        {
+                            fprintf(stderr, "SHMServer Channel:%d ChannelName:%s m_RecvQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
+                        }
+                        // fprintf(stdout, "SHMServer recv Data from Channnel:%d Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
                     }
-                    else if(MsgType::MSG_TYPE_LOGIN == m_Msg.MsgType)
+                    else if(EMsgType::EMSG_TYPE_LOGIN == m_Msg.MsgType)
                     {
-                        fprintf(stdout, "SHMServer recv LOGIN from Channnel:%d Connnection\n", m_AllChannel[i].ChannelID);
-                        ChannelMsg<T> ServerACKMsg;
-                        ServerACKMsg.MsgType = MsgType::MSG_TYPE_SERVER_ACK;
+                        fprintf(stdout, "SHMServer recv LOGIN from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
+                        TChannelMsg<T> ServerACKMsg;
+                        ServerACKMsg.MsgType = EMsgType::EMSG_TYPE_SERVER_ACK;
                         ServerACKMsg.ChannelID = m_AllChannel[i].ChannelID;
                         m_AllChannel[i].SendQueue.Push(ServerACKMsg);
-                        fprintf(stdout, "SHMServer send Server ACK to Channnel:%d Connnection\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer send SERVER_ACK to Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
-                    else if(MsgType::MSG_TYPE_CLIENT_ACK == m_Msg.MsgType)
+                    else if(EMsgType::EMSG_TYPE_CLIENT_ACK == m_Msg.MsgType)
                     {
                         m_AllChannel[i].IsConnected = true;
-                        fprintf(stdout, "SHMServer recv ACK from Channnel:%d Connnection\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer recv CLIENT_ACK from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
-                    else if(MsgType::MSG_TYPE_HEARTBEAT == m_Msg.MsgType)
+                    else if(EMsgType::EMSG_TYPE_HEARTBEAT == m_Msg.MsgType)
                     {
-                        fprintf(stdout, "SHMServer HeartBeat from Channnel:%d Connnection\n", m_AllChannel[i].ChannelID);
+                        fprintf(stdout, "SHMServer recv HEARTBEAT from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
                 else
@@ -224,7 +271,7 @@ protected:
                     if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
                     {
                         m_AllChannel[i].IsConnected = false;
-                        fprintf(stderr, "SHMServer Channnel:%d Connnection disconnect for timeout\n", m_AllChannel[i].ChannelID);
+                        fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect for timeout\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
             }
@@ -234,14 +281,18 @@ protected:
                 bool ret = m_SendQueue.Pop(m_Msg);
                 if(ret)
                 {
+                    m_Msg.MsgID = m_MsgID++;
                     if(m_AllChannel[m_Msg.ChannelID].IsConnected)
                     {
-                        while(!m_AllChannel[m_Msg.ChannelID].SendQueue.Push(m_Msg));
-                        // bool ret = m_AllChannel[m_Msg.ChannelID].SendQueue.Push(m_Msg);
-                        // if(!ret)
-                        // {
-                        //     fprintf(stderr, "SHMServer Channel:%u SendQueue full, misss Msg:%u\n", m_Msg.ChannelID, m_Msg.MsgID);
-                        // }
+                        bool ret = m_AllChannel[m_Msg.ChannelID].SendQueue.Push(m_Msg);
+                        if(ret)
+                        {
+                            m_AllChannel[m_Msg.ChannelID].TimeStamp = RDTSC();
+                        }
+                        else
+                        {
+                            fprintf(stderr, "SHMServer Channel:%u ChannelName:%s SendQueue full, miss Msg:%u\n", m_Msg.ChannelID, m_AllChannel[m_Msg.ChannelID].ChannelName, m_Msg.MsgID);
+                        }
                     }
                 }
                 else
@@ -251,11 +302,8 @@ protected:
             }
         }
     }
-
-    virtual void HandleMsg() = 0;
-
 protected:
-    using SHMQ = SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize>;
+    using SHMQ = SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize>;
     typedef struct
     {
         char ChannelName[Conf::NameSize];
@@ -268,19 +316,20 @@ protected:
     TChannel* m_AllChannel;
     static volatile bool m_Stopped;
     std::thread* m_pInternalThread = nullptr;
-    ChannelMsg<T> m_Msg;
+    TChannelMsg<T> m_Msg;
     int32_t m_CPUID;
+    uint64_t m_MsgID;
 public:
-    static SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize * 4> m_SendQueue;
-    static SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize * 4> m_RecvQueue;
+    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_SendQueue;
+    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_RecvQueue;
 };
 
 template <class T, class Conf> 
 volatile bool SHMServer<T, Conf>::m_Stopped = false;
 template <class T, class Conf> 
-SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
+SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
 template <class T, class Conf> 
-SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
+SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
 
 } // namespace SHMIPC
 

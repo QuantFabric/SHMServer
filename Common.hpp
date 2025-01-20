@@ -21,17 +21,17 @@ struct CommonConf
 };
 
 
-enum MsgType
+enum EMsgType
 {
-    MSG_TYPE_DATA = 0,
-    MSG_TYPE_LOGIN = 1,
-    MSG_TYPE_SERVER_ACK = 2,
-    MSG_TYPE_CLIENT_ACK = 3,
-    MSG_TYPE_HEARTBEAT = 10,
+    EMSG_TYPE_DATA = 0,
+    EMSG_TYPE_LOGIN = 1,
+    EMSG_TYPE_SERVER_ACK = 2,
+    EMSG_TYPE_CLIENT_ACK = 3,
+    EMSG_TYPE_HEARTBEAT = 10,
 };
 
 template <class T>
-struct ChannelMsg
+struct TChannelMsg
 {
     uint32_t MsgType;
     uint64_t MsgID;

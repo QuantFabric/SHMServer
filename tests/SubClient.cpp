@@ -1,5 +1,5 @@
-#include "../Common.hpp"
-#include "../SHMConnection.hpp"
+#include "Common.hpp"
+#include "SHMConnection.hpp"
 
 #include <time.h>
 #include <sched.h>
@@ -12,8 +12,13 @@ struct PackMessage
     uint64_t MsgID;
     char data[100];
     uint64_t TimeStamp;
+    uint32_t ChannelID;
 };
 
+struct ClientConf : public SHMIPC::CommonConf
+{
+    static const bool Performance = true;
+};
 
 int main(int argc, char** argv) 
 {
@@ -23,7 +28,7 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    SHMIPC::SHMConnection<PackMessage, SHMIPC::CommonConf> client(argv[1]);
+    SHMIPC::SHMConnection<PackMessage, ClientConf> client(argv[1]);
     client.Start(argv[2]);
     PackMessage recvMsg;
     while(true)

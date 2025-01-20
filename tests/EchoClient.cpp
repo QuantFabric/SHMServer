@@ -1,5 +1,5 @@
-#include "../Common.hpp"
-#include "../SHMConnection.hpp"
+#include "Common.hpp"
+#include "SHMConnection.hpp"
 
 #include <time.h>
 #include <sched.h>
@@ -22,10 +22,15 @@ struct PackMessage
     uint64_t MsgID;
     char data[100];
     uint64_t TimeStamp;
+    uint32_t ChannelID;
 };
 
 const uint64_t N = 10000000;
 
+struct ClientConf : public SHMIPC::CommonConf
+{
+    static const bool Performance = true;
+};
 
 class EchoClient 
 {
@@ -33,6 +38,7 @@ public:
     EchoClient(const std::string& ClientName):m_Client(ClientName)
     {
         m_pWorkThread = nullptr;
+        m_ClientName = ClientName;
     }
 
     virtual ~EchoClient()
@@ -41,25 +47,23 @@ public:
 
     void Start(const std::string& ServerName, int32_t CPU0, int32_t CPU1)
     {
-        m_CPU = CPU1;
         m_Client.Start(ServerName, CPU0);
-        usleep(1000);
-        
+        m_CPU = CPU1;
         m_pWorkThread = new std::thread(&EchoClient::WorkFunc, this);
         m_pWorkThread->join();
+        m_Client.Join();
     }
 protected:
     void WorkFunc()
     {
         bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPU);
-        printf("%s start WorkFunc thread, CPU:%d ret=%d\n", m_ClientName.c_str(), m_CPU, ret);
+        printf("EchoClient %s start WorkFunc thread, CPU:%d ret=%d\n", m_ClientName.c_str(), m_CPU, ret);
         PackMessage sendMsg, recvMsg;
         sendMsg.MsgID = 0;
         recvMsg.MsgID = 0;
-        uint64_t latency = 0;
         while(recvMsg.MsgID < N)
         {
-            if(sendMsg.MsgID < N && m_Client.Push(sendMsg))
+            if(m_Client.Push(sendMsg))
             {
                 sendMsg.MsgID++;
             }
@@ -68,10 +72,11 @@ protected:
                 recvMsg.MsgID++;
             }
         }
-        printf("%s execute WorkFunc thread done %u\n", m_ClientName.c_str(), latency);
+        m_Client.Stop();
+        printf("EchoClient %s execute WorkFunc thread done\n", m_ClientName.c_str());
     }
 private:
-    SHMIPC::SHMConnection<PackMessage, SHMIPC::CommonConf> m_Client;
+    SHMIPC::SHMConnection<PackMessage, ClientConf> m_Client;
     std::thread* m_pWorkThread;
     std::string m_ClientName;
     int32_t m_CPU;

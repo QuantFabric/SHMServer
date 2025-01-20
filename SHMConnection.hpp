@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <atomic>
 #include "Common.hpp"
 #include "SPSCQueue.hpp"
 #include "MPMCQueue.hpp"
@@ -29,13 +30,17 @@ public:
 
         m_pWorkThread = nullptr;
         m_ChannelID = -1;
-        m_LoginMsg.MsgType = MsgType::MSG_TYPE_LOGIN;
-        m_HeartBeatMsg.MsgType = MsgType::MSG_TYPE_HEARTBEAT;
-        m_DataMsg.MsgType = MsgType::MSG_TYPE_DATA;
+        m_LoginMsg.MsgType = EMsgType::EMSG_TYPE_LOGIN;
+        m_HeartBeatMsg.MsgType = EMsgType::EMSG_TYPE_HEARTBEAT;
+        m_DataMsg.MsgType = EMsgType::EMSG_TYPE_DATA;
+
+        m_Stopped = false;
+        m_IsConnected  =false;
     }
 
     virtual ~SHMConnection()
     {
+        Stop();
         Release();
     }
 
@@ -50,14 +55,42 @@ public:
         }
         fprintf(stdout, "SHMConnection::Start %s connect to %s success by ChannelID:%d\n", m_ClientName, ServerName.c_str(), m_ChannelID);
         Reset();
-        usleep(1000);
         m_LoginMsg.ChannelID = m_ChannelID;
         m_HeartBeatMsg.ChannelID = m_ChannelID;
         m_DataMsg.ChannelID = m_ChannelID;
         // 发送登录请求
         m_Channel->SendQueue.Push(m_LoginMsg);
-        fprintf(stderr, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-        m_pWorkThread = new std::thread(&SHMConnection::WorkFunc, this);
+        fprintf(stdout, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+        while(true)
+        {
+            TChannelMsg<T> Msg;
+            if(m_Channel->RecvQueue.Pop(Msg))
+            {
+                if(EMsgType::EMSG_TYPE_SERVER_ACK == Msg.MsgType)
+                {
+                    fprintf(stdout, "SHMConnection::Start %s recv SERVER_ACK from %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                    Msg.MsgType = EMsgType::EMSG_TYPE_CLIENT_ACK;
+                    Msg.ChannelID = m_ChannelID;
+                    m_Channel->SendQueue.Push(Msg);
+                    m_IsConnected = true;
+                    fprintf(stdout, "SHMConnection::Start %s send CLIENT_ACK to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                    break;
+                }
+            }
+            usleep(1000);
+        }
+        fprintf(stdout, "SHMConnection::Start %s Connected to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+        fflush(stdout); 
+        fflush(stderr);
+        // 开启性能模式，开启工作线程
+        if constexpr (Conf::Performance)
+        {
+            m_pWorkThread = new std::thread(&SHMConnection::WorkFunc, this);
+        }
+        else
+        {
+            WorkFunc();
+        }
     }
 
     bool Push(const T& msg) 
@@ -70,6 +103,62 @@ public:
         return m_RecvQueue.Pop(msg);
     }
 
+    void Join()
+    {
+        if(m_pWorkThread)
+        {
+            m_pWorkThread->join();
+        }
+    }
+
+    void Stop()
+    {
+        m_Stopped = true;
+    }
+
+    bool IsConnected() const
+    {
+        return m_IsConnected;
+    }
+
+    void HandleMsg()
+    {
+        static uint64_t TimeStamp = RDTSC();
+        // 发送数据
+        if(m_SendQueue.Pop(m_DataMsg.Data))
+        {
+            if(m_Channel->SendQueue.Push(m_DataMsg))
+            {
+                // 发送消息时更新时间戳
+                TimeStamp = RDTSC();
+                // fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+            }
+            else
+            {
+                fprintf(stderr, "SHMConnection::HandleMsg %s send msg to %s failed by Channel:%d msg:%u\n", 
+                                m_ClientName, m_ServerName.c_str(), m_ChannelID, m_DataMsg.MsgID);
+            }
+        }
+        // 接收数据
+        if(m_Channel->RecvQueue.Pop(m_DataMsg))
+        {
+            TimeStamp = RDTSC();
+            if(EMsgType::EMSG_TYPE_DATA == m_DataMsg.MsgType)
+            {
+                if(!m_RecvQueue.Push(m_DataMsg.Data))
+                {
+                    fprintf(stderr, "SHMConnection::HandleMsg %s recv msg failed from %s: m_RecvQueue full\n", m_ClientName, m_ServerName.c_str());
+                }
+            }
+        } 
+        // 超时发送心跳包
+        if(m_IsConnected && (TimeStamp + Conf::Heartbeat_Interval - 10e9 < RDTSC()))
+        {
+            TimeStamp = RDTSC();
+            m_Channel->SendQueue.Push(m_HeartBeatMsg);
+            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+        }
+    }
 protected:
     bool Connect(const std::string& ServerName)
     {
@@ -120,53 +209,19 @@ protected:
 
     void WorkFunc()
     {
-        bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
-        fprintf(stdout, "SHMConnection::WorkFunc bind WorkThread to CPU:%d ret=%d ClientName:%s ChannelID:%d\n", m_CPUID, ret, m_ClientName, m_ChannelID);
-        ChannelMsg<T> msg;
-        uint64_t TimeStamp = RDTSC();
-        while(true)
+        // 开启性能模式，绑定CPU
+        if constexpr (Conf::Performance)
         {
-            // 发送数据
-            if(m_SendQueue.Pop(m_DataMsg.Data))
+            bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
+            fprintf(stdout, "SHMConnection::WorkFunc bind WorkThread to CPU:%d ret=%d ClientName:%s ChannelID:%d\n", m_CPUID, ret, m_ClientName, m_ChannelID);
+            while(!m_Stopped)
             {
-                TimeStamp = RDTSC();
-                if(m_Channel->SendQueue.Push(m_DataMsg))
-                {
-                    // 发送消息时更新时间戳
-                    TimeStamp = RDTSC();
-                    // fprintf(stdout, "SHMConnection::WorkFunc %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-                }
-                else
-                {
-                    fprintf(stderr, "SHMConnection::WorkFunc %s send msg to %s failed by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-                }
+                HandleMsg();
             }
-            // 接收数据
-            if(m_Channel->RecvQueue.Pop(msg))
-            {
-                if(MsgType::MSG_TYPE_DATA == msg.MsgType)
-                {
-                    if(!m_RecvQueue.Push(msg.Data))
-                    {
-                        fprintf(stderr, "SHMConnection::WorkFunc %s recv msg from %s failed m_RecvQueue full\n", m_ClientName, m_ServerName.c_str());
-                    }
-                }
-                else if(MsgType::MSG_TYPE_SERVER_ACK == msg.MsgType)
-                {
-                    fprintf(stdout, "SHMConnection::WorkFunc %s recv ACK from %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-                    msg.MsgType = MsgType::MSG_TYPE_CLIENT_ACK;
-                    msg.ChannelID = m_ChannelID;
-                    m_Channel->SendQueue.Push(msg);
-                    fprintf(stdout, "SHMConnection::WorkFunc %s send ACK to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-                }
-            } 
-            // 超时发送心跳包
-            if(m_Channel->IsConnected && (TimeStamp + Conf::Heartbeat_Interval - 10e9 < RDTSC()))
-            {
-                TimeStamp = RDTSC();
-                m_Channel->SendQueue.Push(m_HeartBeatMsg);
-                fprintf(stdout, "SHMConnection::WorkFunc %s send heartbeat to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-            }
+        }
+        else
+        {
+            HandleMsg();
         }
     }
 
@@ -177,6 +232,11 @@ protected:
             shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
             m_AllChannel = nullptr;
             m_Channel = nullptr;
+        }
+        if(m_pWorkThread)
+        {
+            delete m_pWorkThread;
+            m_pWorkThread = nullptr;
         }
     }
 
@@ -197,7 +257,7 @@ private:
     char m_ClientName[Conf::NameSize];
     int32_t m_ChannelID;
     std::string m_ServerName;
-    using SHMQ = SPSCQueue<ChannelMsg<T>, Conf::ShmQueueSize>;
+    using SHMQ = SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize>;
     typedef struct
     {
         char ChannelName[Conf::NameSize];
@@ -211,11 +271,14 @@ private:
     TChannel* m_AllChannel;
 
     std::thread* m_pWorkThread;
-    ChannelMsg<T> m_LoginMsg;
-    ChannelMsg<T> m_HeartBeatMsg;
-    ChannelMsg<T> m_DataMsg;
+    TChannelMsg<T> m_LoginMsg;
+    TChannelMsg<T> m_HeartBeatMsg;
+    TChannelMsg<T> m_DataMsg;
     int32_t m_CPUID;
+    volatile bool m_Stopped;
+    volatile bool m_IsConnected;
 };
+
 
 } // namespace SHMIPC
 

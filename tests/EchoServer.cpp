@@ -1,9 +1,10 @@
-#include "../SHMServer.hpp"
-#include "../Common.hpp"
+#include "SHMServer.hpp"
+#include "Common.hpp"
 
 struct ServerConf : public SHMIPC::CommonConf
 {
     static const bool Publish = false;
+    static const bool Performance = true;
 };
 
 
@@ -12,6 +13,7 @@ struct PackMessage
     uint64_t MsgID;
     char data[100];
     uint64_t TimeStamp;
+    uint32_t ChannelID;
 };
 
 class EchoServer : public SHMIPC::SHMServer<PackMessage, ServerConf>
@@ -29,13 +31,17 @@ public:
 
     void HandleMsg()
     {
-        static SHMIPC::ChannelMsg<PackMessage> msg;
+        static SHMIPC::TChannelMsg<PackMessage> Msg;
         while(true)
         {
             // 将接收客户端消息发送回客户端
-            if(m_RecvQueue.Pop(msg))
+            if(m_RecvQueue.Pop(Msg))
             {
-                while(!m_SendQueue.Push(msg));
+                if(!m_SendQueue.Push(Msg))
+                {
+                    fprintf(stderr, "EchoServer::HandleMsg send msg failed, m_SendQueue full\n");
+                    break;
+                }
             }
             else
             {

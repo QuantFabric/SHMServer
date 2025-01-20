@@ -1,8 +1,5 @@
 /build
 /tests/log
-/tests/build
+/tests/build/
 /*.log
-/tests/EchoServer
-/tests/EchoClient
-/tests/PubServer
-/tests/SubClient
+/pybind11/build

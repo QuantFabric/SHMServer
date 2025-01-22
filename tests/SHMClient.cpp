@@ -10,7 +10,7 @@
 
 struct ClientConf : public SHMIPC::CommonConf
 {
-    static const bool Performance = true;
+    static const bool Performance = false;
 };
 
 
@@ -195,6 +195,10 @@ int main(int argc, char** argv)
     Message::PackMessage recvMsg;
     while(true)
     {
+        if constexpr(!ClientConf::Performance)
+        {
+            client.HandleMsg();
+        }
         if(client.Pop(recvMsg))
         {
             if(recvMsg.MessageType == Message::EMessageType::EFutureMarketData)

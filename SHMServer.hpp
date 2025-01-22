@@ -35,10 +35,26 @@ public:
         m_CPUID = CPUID;
         // 初始化共享内存
         InitChannel(ServerName);
-        // 注册信号
-        signal(SIGKILL, SHMServer::SignalHandler);
-        signal(SIGTERM, SHMServer::SignalHandler);
-        signal(SIGINT, SHMServer::SignalHandler);
+        // 注册信号处理函数
+        auto signal_handler = [](int signal) {
+            if(signal == SIGINT)
+            {
+                fprintf(stdout, "SHMServer recv SIGINT,Quit...\n");
+            }
+            else if(signal == SIGTERM)
+            {
+                fprintf(stdout, "SHMServer recv SIGTERM,Quit...\n");
+            }
+            else if(signal == SIGKILL)
+            {
+                fprintf(stdout, "SHMServer recv SIGKILL,Quit...\n");
+            }
+            fflush(stdout);
+            exit(signal);  // 退出程序
+        };
+        signal(SIGKILL, signal_handler);
+        signal(SIGTERM, signal_handler);
+        signal(SIGINT, signal_handler);
         // 开启性能模式
         if constexpr (Conf::Performance)
         {
@@ -62,7 +78,7 @@ public:
         Msg.ChannelID = msg.ChannelID;
         Msg.MsgType = EMsgType::EMSG_TYPE_DATA;
         Msg.TimeStamp = RDTSC();
-        memcpy(&Msg.Data, &msg, sizeof(T));
+        memcpy(&Msg.Data, &msg, sizeof(Msg.Data));
         return m_SendQueue.Push(Msg);
     }
 
@@ -94,69 +110,10 @@ public:
 
     virtual void HandleMsg()
     {
-
-    }
-protected:
-    void InitChannel(const std::string& ServerName)
-    {
-        std::string shm_file = std::string("/") + ServerName + ".shm";
-        m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
-        if(m_AllChannel) 
-        {
-            for(int i = 0; i < Conf::ChannelSize; i++)
-            {
-                m_AllChannel[i].ChannelID = i;
-                m_AllChannel[i].SendQueue.Reset();
-                m_AllChannel[i].RecvQueue.Reset();
-                m_AllChannel[i].TimeStamp = RDTSC();
-                fprintf(stdout, "SHMServer Init Channel:%d 0X%p\n", i, &m_AllChannel[i]);
-            }
-            fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
-        }
-        else
-        {
-            fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
-        }
+       
     }
 
-    void Release()
-    {
-        if(m_AllChannel)
-        {
-            shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
-            m_AllChannel = nullptr;
-        }
-        if(m_pInternalThread)
-        {
-            delete m_pInternalThread;
-            m_pInternalThread = nullptr;
-        }
-    }
-
-    static void SignalHandler(int s) 
-    {
-        m_Stopped = true;
-    }
-
-    void WorkFunc()
-    {
-        // 开启性能模式
-        if constexpr (Conf::Performance)
-        {
-            // 绑定CPU
-            bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
-            fprintf(stdout, "SHMServer::WorkFunc InternalThread bind to CPU:%d, ret=%d\n", m_CPUID, ret);
-        }
-        while(!m_Stopped) 
-        {
-            PollMsg();
-            HandleMsg();
-        }
-        // 停止服务
-        Stop();
-    }
-
-    void PollMsg() 
+   void PollMsg() 
     {
         // 发布订阅模式
         if constexpr (Conf::Publish)
@@ -194,14 +151,12 @@ protected:
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
-                    m_Msg.MsgID = m_MsgID++;
                     m_AllChannel[i].TimeStamp = RDTSC();
                     if(EMsgType::EMSG_TYPE_LOGIN == m_Msg.MsgType)
                     {
                         fprintf(stdout, "SHMServer recv LOGIN from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
-                        TChannelMsg<T> ServerACKMsg;
+                        static TChannelMsg<T> ServerACKMsg;
                         ServerACKMsg.MsgType = EMsgType::EMSG_TYPE_SERVER_ACK;
-                        ServerACKMsg.MsgID = m_MsgID++;
                         ServerACKMsg.ChannelID = m_AllChannel[i].ChannelID;
                         m_AllChannel[i].SendQueue.Push(ServerACKMsg);
                         fprintf(stdout, "SHMServer send SERVER_ACK to Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
@@ -216,14 +171,11 @@ protected:
                         fprintf(stdout, "SHMServer recv HEARTBEAT from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
-                else
+                // 超时断开连接
+                if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
                 {
-                    // 超时断开连接
-                    if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
-                    {
-                        m_AllChannel[i].IsConnected = false;
-                        fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
-                    }
+                    m_AllChannel[i].IsConnected = false;
+                    fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                 }
             }
         }
@@ -265,14 +217,11 @@ protected:
                         fprintf(stdout, "SHMServer recv HEARTBEAT from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                     }
                 }
-                else
+                // 超时断开连接
+                if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
                 {
-                    // 超时断开连接
-                    if(m_AllChannel[i].IsConnected && (m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval <  RDTSC()))
-                    {
-                        m_AllChannel[i].IsConnected = false;
-                        fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect for timeout\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
-                    }
+                    m_AllChannel[i].IsConnected = false;
+                    fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect for timeout\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                 }
             }
             // 发送消息到客户端
@@ -288,6 +237,7 @@ protected:
                         if(ret)
                         {
                             m_AllChannel[m_Msg.ChannelID].TimeStamp = RDTSC();
+                            // fprintf(stdout, "SHMServer send Data from Channnel:%d Msg:%u\n", m_AllChannel[m_Msg.ChannelID].ChannelID, m_Msg.MsgID);
                         }
                         else
                         {
@@ -303,6 +253,67 @@ protected:
         }
     }
 protected:
+    void InitChannel(const std::string& ServerName)
+    {
+        std::string shm_file = std::string("/") + ServerName + ".shm";
+        m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
+        if(m_AllChannel) 
+        {
+            for(int i = 0; i < Conf::ChannelSize; i++)
+            {
+                m_AllChannel[i].ChannelID = i;
+                m_AllChannel[i].SendQueue.Reset();
+                m_AllChannel[i].RecvQueue.Reset();
+                m_AllChannel[i].TimeStamp = RDTSC();
+                fprintf(stdout, "SHMServer Init Channel:%d 0X%p\n", i, &m_AllChannel[i]);
+            }
+            fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+        }
+        else
+        {
+            fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
+        }
+        fflush(stdout); 
+        fflush(stderr);
+    }
+
+    void Release()
+    {
+        if(m_AllChannel)
+        {
+            shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
+            m_AllChannel = nullptr;
+        }
+        if(m_pInternalThread)
+        {
+            delete m_pInternalThread;
+            m_pInternalThread = nullptr;
+        }
+    }
+
+    void WorkFunc()
+    {
+        // 开启性能模式
+        if constexpr (Conf::Performance)
+        {
+            // 绑定CPU
+            bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
+            fprintf(stdout, "SHMServer::WorkFunc InternalThread bind to CPU:%d, ret=%d\n", m_CPUID, ret);
+            while(!m_Stopped) 
+            {
+                PollMsg();
+                HandleMsg();
+            }
+            // 停止服务
+            Stop();
+        }
+        else
+        {
+            PollMsg();
+            HandleMsg();
+        }
+    }
+protected:
     using SHMQ = SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize>;
     typedef struct
     {
@@ -314,22 +325,21 @@ protected:
         alignas(128) SHMQ RecvQueue;
     }TChannel;
     TChannel* m_AllChannel;
-    static volatile bool m_Stopped;
+    volatile bool m_Stopped;
     std::thread* m_pInternalThread = nullptr;
     TChannelMsg<T> m_Msg;
     int32_t m_CPUID;
     uint64_t m_MsgID;
-public:
-    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_SendQueue;
-    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_RecvQueue;
+    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 2> m_SendQueue;
+    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 2> m_RecvQueue;
 };
 
-template <class T, class Conf> 
-volatile bool SHMServer<T, Conf>::m_Stopped = false;
-template <class T, class Conf> 
-SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
-template <class T, class Conf> 
-SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
+// template <class T, class Conf> 
+// volatile bool SHMServer<T, Conf>::m_Stopped = false;
+// template <class T, class Conf> 
+// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
+// template <class T, class Conf> 
+// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
 
 } // namespace SHMIPC
 

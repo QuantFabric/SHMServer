@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <atomic>
+#include <signal.h>
 #include "Common.hpp"
 #include "SPSCQueue.hpp"
 #include "MPMCQueue.hpp"
@@ -35,7 +36,27 @@ public:
         m_DataMsg.MsgType = EMsgType::EMSG_TYPE_DATA;
 
         m_Stopped = false;
-        m_IsConnected  =false;
+        m_IsConnected = false;
+        // 注册信号处理函数
+        auto signal_handler = [](int signal) {
+            if(signal == SIGINT)
+            {
+                fprintf(stdout, "SHMConnection recv SIGINT,Quit...\n");
+            }
+            else if(signal == SIGTERM)
+            {
+                fprintf(stdout, "SHMConnection recv SIGTERM,Quit...\n");
+            }
+            else if(signal == SIGKILL)
+            {
+                fprintf(stdout, "SHMConnection recv SIGKILL,Quit...\n");
+            }
+            fflush(stdout);
+            exit(signal);  // 退出程序
+        };
+        signal(SIGKILL, signal_handler);
+        signal(SIGTERM, signal_handler);
+        signal(SIGINT, signal_handler);
     }
 
     virtual ~SHMConnection()
@@ -63,6 +84,7 @@ public:
         fprintf(stdout, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         while(true)
         {
+            static uint64_t TimeStamp = RDTSC();
             TChannelMsg<T> Msg;
             if(m_Channel->RecvQueue.Pop(Msg))
             {
@@ -77,11 +99,24 @@ public:
                     break;
                 }
             }
+            if(TimeStamp + 1e10 < RDTSC())
+            {
+                m_IsConnected = false;
+                break;
+            }
             usleep(1000);
+        }
+        if(!m_IsConnected)
+        {
+            fprintf(stderr, "SHMConnection::Start %s Connected to %s by Channel:%d failed\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+            fflush(stdout);
+            fflush(stderr);
+            return ;
         }
         fprintf(stdout, "SHMConnection::Start %s Connected to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         fflush(stdout); 
         fflush(stderr);
+        m_TimeStamp = RDTSC();
         // 开启性能模式，开启工作线程
         if constexpr (Conf::Performance)
         {
@@ -123,14 +158,13 @@ public:
 
     void HandleMsg()
     {
-        static uint64_t TimeStamp = RDTSC();
         // 发送数据
         if(m_SendQueue.Pop(m_DataMsg.Data))
         {
             if(m_Channel->SendQueue.Push(m_DataMsg))
             {
                 // 发送消息时更新时间戳
-                TimeStamp = RDTSC();
+                m_TimeStamp = RDTSC();
                 // fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
             }
             else
@@ -142,7 +176,7 @@ public:
         // 接收数据
         if(m_Channel->RecvQueue.Pop(m_DataMsg))
         {
-            TimeStamp = RDTSC();
+            m_TimeStamp = RDTSC();
             if(EMsgType::EMSG_TYPE_DATA == m_DataMsg.MsgType)
             {
                 if(!m_RecvQueue.Push(m_DataMsg.Data))
@@ -152,11 +186,11 @@ public:
             }
         } 
         // 超时发送心跳包
-        if(m_IsConnected && (TimeStamp + Conf::Heartbeat_Interval - 10e9 < RDTSC()))
+        if(m_TimeStamp + Conf::Heartbeat_Interval - 50e9 < RDTSC())
         {
-            TimeStamp = RDTSC();
+            m_TimeStamp = RDTSC();
             m_Channel->SendQueue.Push(m_HeartBeatMsg);
-            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, m_TimeStamp);
         }
     }
 protected:
@@ -277,6 +311,7 @@ private:
     int32_t m_CPUID;
     volatile bool m_Stopped;
     volatile bool m_IsConnected;
+    uint64_t m_TimeStamp;
 };
 
 

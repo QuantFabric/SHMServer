@@ -1,5 +1,6 @@
 #!/bin/bash
 ulimit -c unlimited
+ulimit -s 16384
 WORK_PATH=$(cd $(dirname $0); pwd)
 LOG_PATH=$WORK_PATH/log
 mkdir -p $LOG_PATH

@@ -51,6 +51,7 @@ PYBIND11_MODULE(shm_server, m) {
         .def("Stop", &SHMIPC::SHMServer<Message::PackMessage, ServerConf>::Stop, "停止SHMServer")
         .def("Push", &SHMIPC::SHMServer<Message::PackMessage, ServerConf>::Push, "推送消息到队列", py::arg("msg"))
         .def("Pop", &SHMIPC::SHMServer<Message::PackMessage, ServerConf>::Pop, "从队列弹出消息", py::arg("msg"))
+        .def("PollMsg", &SHMIPC::SHMServer<Message::PackMessage, ServerConf>::PollMsg, "处理消息")
         .def("HandleMsg", &SHMIPC::SHMServer<Message::PackMessage, ServerConf>::HandleMsg, "处理消息回调");
 
     m.doc() = "SHMServer Python绑定";

@@ -81,21 +81,21 @@ public:
         return true;
     }
 
-    force_inline bool Push(const T *value)
-    {
-        const int WriteIndex = m_Tail.load(std::memory_order_relaxed);
-        const int NextWriteIndex = (WriteIndex + 1) & (N - 1);
-        // Queue is full
-        if(NextWriteIndex == m_Head.load(std::memory_order_acquire))
-        {
-            return false;
-        }
-        // m_Data[WriteIndex] = *value;
-        memcpy(&m_Data[WriteIndex], value, sizeof(T));
-        // Update m_Tail
-        m_Tail.store(NextWriteIndex, std::memory_order_release);
-        return true;
-    }
+    // force_inline bool Push(const T *value)
+    // {
+    //     const int WriteIndex = m_Tail.load(std::memory_order_relaxed);
+    //     const int NextWriteIndex = (WriteIndex + 1) & (N - 1);
+    //     // Queue is full
+    //     if(NextWriteIndex == m_Head.load(std::memory_order_acquire))
+    //     {
+    //         return false;
+    //     }
+    //     // m_Data[WriteIndex] = *value;
+    //     memcpy(&m_Data[WriteIndex], value, sizeof(T));
+    //     // Update m_Tail
+    //     m_Tail.store(NextWriteIndex, std::memory_order_release);
+    //     return true;
+    // }
 
     force_inline inline bool Pop(T &value)
     {

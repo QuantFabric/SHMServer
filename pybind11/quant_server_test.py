@@ -149,6 +149,7 @@ class QuantServer(shm_server.SHMServer):
     def Run(self, market_server_name:str, quant_server_name:str):
         self.data_connection = shm_connection.SHMConnection(quant_server_name)
         self.data_connection.Start(market_server_name)
+        order_id = 1
         while True:
             # 处理SHMServer消息数据
             self.PollMsg()
@@ -168,6 +169,8 @@ class QuantServer(shm_server.SHMServer):
                     order.OrderRequest.OrderType = pack_message.EOrderType.ELIMIT
                     order.OrderRequest.Price = self.msg.FutureMarketData.AskPrice1
                     order.OrderRequest.Volume = 1
+                    order.OrderRequest.OrderToken = order_id
+                    order_id += 1
                     order.OrderRequest.Direction = pack_message.EOrderDirection.EBUY
                     order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
@@ -189,6 +192,8 @@ class QuantServer(shm_server.SHMServer):
                     order.OrderRequest.OrderType = pack_message.EOrderType.ELIMIT
                     order.OrderRequest.Price = self.msg.FutureMarketData.BidPrice1
                     order.OrderRequest.Volume = 1
+                    order.OrderRequest.OrderToken = order_id
+                    order_id += 1
                     order.OrderRequest.Direction = pack_message.EOrderDirection.ESELL
                     order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
@@ -236,6 +241,8 @@ class QuantServer(shm_server.SHMServer):
             if now > target_time:
                 print(f"当前时间:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，已经收盘，退出程序")
                 break
+        sys.stdout.flush()
+        
         
 if __name__ == "__main__":
     

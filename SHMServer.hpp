@@ -22,6 +22,7 @@ public:
         m_AllChannel = nullptr;
         m_pInternalThread = nullptr;
         m_MsgID = 1;
+        m_Stopped = false;
     }
 
     virtual ~SHMServer() 
@@ -261,10 +262,12 @@ protected:
         {
             for(int i = 0; i < Conf::ChannelSize; i++)
             {
+                memset(&m_AllChannel[i].ChannelName, 0, sizeof(m_AllChannel[i].ChannelName));
                 m_AllChannel[i].ChannelID = i;
                 m_AllChannel[i].SendQueue.Reset();
                 m_AllChannel[i].RecvQueue.Reset();
                 m_AllChannel[i].TimeStamp = RDTSC();
+                m_AllChannel[i].IsConnected = false;
                 fprintf(stdout, "SHMServer Init Channel:%d 0X%p\n", i, &m_AllChannel[i]);
             }
             fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
@@ -330,16 +333,16 @@ protected:
     TChannelMsg<T> m_Msg;
     int32_t m_CPUID;
     uint64_t m_MsgID;
-    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 2> m_SendQueue;
-    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 2> m_RecvQueue;
+    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_SendQueue;
+    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_RecvQueue;
 };
 
 // template <class T, class Conf> 
 // volatile bool SHMServer<T, Conf>::m_Stopped = false;
-// template <class T, class Conf> 
-// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
-// template <class T, class Conf> 
-// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
+template <class T, class Conf> 
+SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
+template <class T, class Conf> 
+SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
 
 } // namespace SHMIPC
 

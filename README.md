@@ -22,7 +22,7 @@
     ```
 - **pybind11安装**：
     ```bash
-    git clone https://github.com/pybind/pybind11.git  pybind11
+    git clone git@github.com:pybind/pybind11.git  pybind11
     cd pybind11
     mkdir build
     cd build

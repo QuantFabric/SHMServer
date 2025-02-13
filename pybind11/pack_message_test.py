@@ -403,6 +403,58 @@ def TEST_TAccountPosition():
     print("UpdateTime", position.UpdateTime)
     print("\n")
 
+struct TAppStatus
+{
+    char Colo[16];
+    char Account[16];
+    char AppName[32];
+    int PID;
+    char Status[16];
+    double UsedCPURate;
+    double UsedMemSize;
+    char StartTime[32];
+    char LastStartTime[32];
+    char CommitID[16];
+    char UtilsCommitID[16];
+    char APIVersion[32];
+    char StartScript[400];
+    char UpdateTime[32];
+};
+
+def TEST_TAppStatus():
+    print("Test TAppStatus...")
+    appstatus = pack_message.TAppStatus()
+    appstatus.Colo = "ZX_F1"
+    appstatus.Account = "188795"
+    appstatus.AppName = "XTrader_0.9.2"
+    appstatus.PID = 123456
+    appstatus.Status = "Runing"
+    appstatus.UsedCPURate = 0.50
+    appstatus.UsedMemSize = 500.0
+    appstatus.StartTime = "2024-12-30 09:00:00.123456"
+    appstatus.LastStartTime = "2024-12-30 11:00:00.123456"
+    appstatus.CommitID = "acdfgh"
+    appstatus.UtilsCommitID = "acdfghvf"
+    appstatus.APIVersion = "1.0"
+    appstatus.StartScript = "nohup"
+    appstatus.UpdateTime = "2024-12-30 12:00:00.123456"
+
+    print("Colo", appstatus.Colo)
+    print("Account", appstatus.Account)
+    print("AppName", appstatus.AppName)
+    print("PID", appstatus.PID)
+    print("Status", appstatus.Status)
+    print("UsedCPURate", appstatus.UsedCPURate)
+    print("UsedMemSize", appstatus.UsedMemSize)
+    print("StartTime", appstatus.StartTime)
+    print("LastStartTime", appstatus.LastStartTime)
+    print("CommitID", appstatus.CommitID)
+    print("UtilsCommitID", appstatus.UtilsCommitID)
+    print("APIVersion", appstatus.APIVersion)
+    print("StartScript", appstatus.StartScript)
+    print("UpdateTime", appstatus.UpdateTime)
+    print("\n")
+
 
 def TEST_EMessageType():
     print("Test EMessageType...")
@@ -519,6 +571,7 @@ if __name__ == "__main__":
     TEST_TFuturePosition()
     TEST_TStockPosition()
     TEST_TAccountPosition()
+    TEST_TAppStatus()
     TEST_EMessageType()
     TEST_PackMessage()
     

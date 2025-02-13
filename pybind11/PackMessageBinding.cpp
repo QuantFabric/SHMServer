@@ -37,6 +37,169 @@ PYBIND11_MODULE(pack_message, m) {
                 self.Data = value;
             });
 
+    // EClientType enum binding
+    py::enum_<Message::EClientType>(m, "EClientType")
+        .value("EXTRADER", Message::EClientType::EXTRADER)
+        .value("EXMONITOR", Message::EClientType::EXMONITOR)
+        .value("EXMARKETCENTER", Message::EClientType::EXMARKETCENTER)
+        .value("EXRISKJUDGE", Message::EClientType::EXRISKJUDGE)  
+        .value("EXWATCHER", Message::EClientType::EXWATCHER)
+        .value("EXQUANT", Message::EClientType::EXQUANT)
+        .value("EHFTRADER", Message::EClientType::EHFTRADER)   
+        .value("EXDATAPLAYER", Message::EClientType::EXDATAPLAYER)   
+        .export_values(); 
+
+    py::class_<Message::TLoginRequest>(m, "TLoginRequest")
+        .def(py::init<>())
+        .def_readwrite("ClientType", &Message::TLoginRequest::ClientType)
+        .def_property("Colo",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Colo);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Colo, value.c_str(), sizeof(self.Colo) - 1);
+                self.Colo[sizeof(self.Colo) - 1] = '\0';
+            })
+        .def_property("Account",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Account);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Account, value.c_str(), sizeof(self.Account) - 1);
+                self.Account[sizeof(self.Account) - 1] = '\0';
+            })
+        .def_property("PassWord",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.PassWord);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.PassWord, value.c_str(), sizeof(self.PassWord) - 1);
+                self.PassWord[sizeof(self.PassWord) - 1] = '\0';
+            })
+        .def_property("Operation",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Operation);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Operation, value.c_str(), sizeof(self.Operation) - 1);
+                self.Operation[sizeof(self.Operation) - 1] = '\0';
+            })
+        .def_property("Role",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Role);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Role, value.c_str(), sizeof(self.Role) - 1);
+                self.Role[sizeof(self.Role) - 1] = '\0';
+            })
+        .def_property("Plugins",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Plugins);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Plugins, value.c_str(), sizeof(self.Plugins) - 1);
+                self.Plugins[sizeof(self.Plugins) - 1] = '\0';
+            })
+        .def_property("Messages",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.Messages);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.Messages, value.c_str(), sizeof(self.Messages) - 1);
+                self.Messages[sizeof(self.Messages) - 1] = '\0';
+            })
+        .def_property("UUID",
+            [](const Message::TLoginRequest& self) {
+                return std::string(self.UUID);  // 返回 bytes 类型
+            },
+            [](Message::TLoginRequest& self, const std::string& value) {
+                std::strncpy(self.UUID, value.c_str(), sizeof(self.UUID) - 1);
+                self.UUID[sizeof(self.UUID) - 1] = '\0';
+            });
+
+    // EEventLogLevel enum binding
+    py::enum_<Message::EEventLogLevel>(m, "EEventLogLevel")
+        .value("EINFO", Message::EEventLogLevel::EINFO)
+        .value("EWARNING", Message::EEventLogLevel::EWARNING)
+        .value("EERROR", Message::EEventLogLevel::EERROR)
+        .export_values(); 
+
+    py::class_<Message::TEventLog>(m, "TEventLog")
+        .def(py::init<>())
+        .def_property("Colo",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Colo);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Colo, value.c_str(), sizeof(self.Colo) - 1);
+                self.Colo[sizeof(self.Colo) - 1] = '\0';
+            })
+        .def_property("Broker",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Broker);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Broker, value.c_str(), sizeof(self.Broker) - 1);
+                self.Broker[sizeof(self.Broker) - 1] = '\0';
+            })
+        .def_property("Product",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Product);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Product, value.c_str(), sizeof(self.Product) - 1);
+                self.Product[sizeof(self.Product) - 1] = '\0';
+            })
+        .def_property("Account",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Account);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Account, value.c_str(), sizeof(self.Account) - 1);
+                self.Account[sizeof(self.Account) - 1] = '\0';
+            })
+        .def_property("Ticker",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Ticker);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Ticker, value.c_str(), sizeof(self.Ticker) - 1);
+                self.Ticker[sizeof(self.Ticker) - 1] = '\0';
+            })
+        .def_property("ExchangeID",
+            [](const Message::TEventLog& self) {
+                return std::string(self.ExchangeID);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.ExchangeID, value.c_str(), sizeof(self.ExchangeID) - 1);
+                self.ExchangeID[sizeof(self.ExchangeID) - 1] = '\0';
+            })
+        .def_property("App",
+            [](const Message::TEventLog& self) {
+                return std::string(self.App);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.App, value.c_str(), sizeof(self.App) - 1);
+                self.App[sizeof(self.App) - 1] = '\0';
+            })
+        .def_property("Event",
+            [](const Message::TEventLog& self) {
+                return std::string(self.Event);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.Event, value.c_str(), sizeof(self.Event) - 1);
+                self.Event[sizeof(self.Event) - 1] = '\0';
+            })
+        .def_readwrite("Level", &Message::TEventLog::Level)
+        .def_property("UpdateTime",
+            [](const Message::TEventLog& self) {
+                return std::string(self.UpdateTime);  // 返回 bytes 类型
+            },
+            [](Message::TEventLog& self, const std::string& value) {
+                std::strncpy(self.UpdateTime, value.c_str(), sizeof(self.UpdateTime) - 1);
+                self.UpdateTime[sizeof(self.UpdateTime) - 1] = '\0';
+            });
+
     // EBusinessType enum binding
     py::enum_<Message::EBusinessType>(m, "EBusinessType")
         .value("ESTOCK", Message::EBusinessType::ESTOCK)
@@ -866,6 +1029,99 @@ PYBIND11_MODULE(pack_message, m) {
                 self.RecvLocalTime[sizeof(self.RecvLocalTime) - 1] = '\0';
             });
 
+    py::class_<Message::TAppStatus>(m, "TAppStatus")
+        .def(py::init<>())
+        .def_property("Colo",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.Colo);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.Colo, value.c_str(), sizeof(self.Colo) - 1);
+                self.Colo[sizeof(self.Colo) - 1] = '\0';
+            })
+        .def_property("Account",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.Account);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.Account, value.c_str(), sizeof(self.Account) - 1);
+                self.Account[sizeof(self.Account) - 1] = '\0';
+            })
+        .def_property("AppName",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.AppName);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.AppName, value.c_str(), sizeof(self.AppName) - 1);
+                self.AppName[sizeof(self.AppName) - 1] = '\0';
+            })
+        .def_readwrite("PID", &Message::TAppStatus::PID)
+        .def_property("Status",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.Status);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.Status, value.c_str(), sizeof(self.Status) - 1);
+                self.Status[sizeof(self.Status) - 1] = '\0';
+            })
+        .def_readwrite("UsedCPURate", &Message::TAppStatus::UsedCPURate)
+        .def_readwrite("UsedMemSize", &Message::TAppStatus::UsedMemSize)
+        .def_property("StartTime",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.StartTime);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.StartTime, value.c_str(), sizeof(self.StartTime) - 1);
+                self.StartTime[sizeof(self.StartTime) - 1] = '\0';
+            })
+        .def_property("LastStartTime",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.LastStartTime);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.LastStartTime, value.c_str(), sizeof(self.LastStartTime) - 1);
+                self.LastStartTime[sizeof(self.LastStartTime) - 1] = '\0';
+            })
+        .def_property("CommitID",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.CommitID);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.CommitID, value.c_str(), sizeof(self.CommitID) - 1);
+                self.CommitID[sizeof(self.CommitID) - 1] = '\0';
+            })
+        .def_property("UtilsCommitID",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.UtilsCommitID);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.UtilsCommitID, value.c_str(), sizeof(self.UtilsCommitID) - 1);
+                self.UtilsCommitID[sizeof(self.UtilsCommitID) - 1] = '\0';
+            })
+        .def_property("APIVersion",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.APIVersion);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.APIVersion, value.c_str(), sizeof(self.APIVersion) - 1);
+                self.APIVersion[sizeof(self.APIVersion) - 1] = '\0';
+            })
+        .def_property("StartScript",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.StartScript);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.StartScript, value.c_str(), sizeof(self.StartScript) - 1);
+                self.StartScript[sizeof(self.StartScript) - 1] = '\0';
+            })
+        .def_property("UpdateTime",
+            [](const Message::TAppStatus& self) {
+                return std::string(self.UpdateTime);  // 返回 bytes 类型
+            },
+            [](Message::TAppStatus& self, const std::string& value) {
+                std::strncpy(self.UpdateTime, value.c_str(), sizeof(self.UpdateTime) - 1);
+                self.UpdateTime[sizeof(self.UpdateTime) - 1] = '\0';
+            });
     // MessageType enum binding
     py::enum_<Message::EMessageType>(m, "EMessageType")
         .value("ETest", Message::EMessageType::ETest)
@@ -909,5 +1165,13 @@ PYBIND11_MODULE(pack_message, m) {
         .def_readwrite("FastOrder", &Message::PackMessage::FastOrder)
         .def_readwrite("FutureMarketData", &Message::PackMessage::FutureMarketData)
         .def_readwrite("StockMarketData", &Message::PackMessage::StockMarketData)
-        .def_readwrite("SpotMarketData", &Message::PackMessage::SpotMarketData);
+        .def_readwrite("SpotMarketData", &Message::PackMessage::SpotMarketData)
+        .def("to_bytes", [](const Message::PackMessage& s) {
+            // 使用std::array确保有足够的内存空间来存储结构体数据
+            std::array<char, sizeof(Message::PackMessage)> buffer;
+            // 将结构体复制到buffer中，这里使用了memcpy来简化操作，确保类型正确对齐和大小匹配
+            std::memcpy(buffer.data(), &s, sizeof(Message::PackMessage));
+            // 返回一个指向该内存的bytes对象，注意这里使用了std::move来转移所有权，避免复制整个数组
+            return py::bytes(buffer.data(), sizeof(Message::PackMessage));
+        });
 }

@@ -6,6 +6,31 @@ import time
 import signal
 import sys
 import datetime
+import os
+
+from HPSocket import TcpPack
+from HPSocket import helper
+import HPSocket.pyhpsocket as HPSocket
+
+class HPPackClient(TcpPack.HP_TcpPackClient):
+    EventDescription = TcpPack.HP_TcpPackServer.EventDescription
+
+    @EventDescription
+    def OnSend(self, Sender, ConnID, Data):
+        print('[%d, OnSend] data len=%d' % (ConnID, len(Data)))
+
+    @EventDescription
+    def OnConnect(self, Sender, ConnID):
+        print('[%d, OnConnect] Success.' % ConnID)
+
+    @EventDescription
+    def OnReceive(self, Sender, ConnID, Data):
+        print('[%d, OnReceive] data len=%d' % (ConnID, len(Data)))
+
+    def SendData(self, msg):
+        self.Send(self.Client, msg)
+
+
 
             
 def print_msg(msg):
@@ -147,6 +172,7 @@ class QuantServer(shm_server.SHMServer):
         self.account_info_dict = dict()
             
     def Run(self, market_server_name:str, quant_server_name:str):
+        register_client()
         self.data_connection = shm_connection.SHMConnection(quant_server_name)
         self.data_connection.Start(market_server_name)
         order_id = 1
@@ -242,13 +268,54 @@ class QuantServer(shm_server.SHMServer):
                 print(f"当前时间:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，已经收盘，退出程序")
                 break
         sys.stdout.flush()
-        
-        
-if __name__ == "__main__":
     
+
+def register_client():
+    import struct
+    import sys
+    import os
+
+    cmd = sys.executable + " " + " ".join(sys.argv)
+    app_log_path = os.environ.get('APP_LOG_PATH')
+    if app_log_path is None:
+        app_log_path = "./log/"
+
+    account = 'SMAStrategy'
+    app_name = 'quant_server_test'
+    scripts = "nohup {} > {}/{}_{}_run.log 2>&1 &".format(cmd, app_log_path, app_name, account)
+
+    print(bytes(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'), 'utf-8'))
+    client = HPPackClient()
+    client.Start(host='192.168.1.168', port=8001, head_flag=0x169, size=0XFFFF)
+
+    msg = pack_message.PackMessage()
+    msg.MessageType = pack_message.EMessageType.ELoginRequest
+    msg.LoginRequest.ClientType = pack_message.EClientType.EXQUANT
+    msg.LoginRequest.Account = account
+    client.SendData(msg.to_bytes())
+
+    msg = pack_message.PackMessage()
+    msg.MessageType = pack_message.EMessageType.EAppStatus
+    msg.AppStatus.Colo = ""
+    msg.AppStatus.Account = account
+    msg.AppStatus.AppName = app_name
+    msg.AppStatus.PID = os.getpid()
+    msg.AppStatus.Status = "Start"
+    msg.AppStatus.UsedCPURate = 0.50
+    msg.AppStatus.UsedMemSize = 500.0
+    msg.AppStatus.StartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+    msg.AppStatus.LastStartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+    msg.AppStatus.APIVersion = "1.0"
+    msg.AppStatus.StartScript = scripts
+    msg.AppStatus.UpdateTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+    client.SendData(msg.to_bytes())
+
+
+if __name__ == "__main__":
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     quant_server_name = "QuantServer"
     market_server_name = "MarketServer"
     server = QuantServer()

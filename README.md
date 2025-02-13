@@ -47,11 +47,20 @@
     tools/pybind11Common.cmake:195 (include)
     CMakeLists.txt:232 (include)
     ```
+- **安装HPSocket4Python**：
+    ```bash
+    pip3 install HPSocket
+    pip3 install HPSocket -i https://pypi.tuna.tsinghua.edu.cn/simple/
+    ```
+
+- **Quant交易平台**：
+    - quant_server_test.py：QuantServer测试用例，QuantServer服务器，从共享内存通道接收行情数据，通过共享内存通道发送订单信息;初始化进程状态发送给XWatcher，实现进程监控。
+
+
 - **pybind11测试用例**：
     - shm_server_test.py：SHMServer测试用例。
     - shm_connection_test.py：SHMConnection测试用例，连接SHMServer服务器。
     - market_client_test.py：行情客户端测试用例，可以连接XMarketCenter行情服务，从共享内存通道接收行情数据。
-    - quant_server_test.py：QuantServer测试用例，QuantServer服务器，从共享内存通道接收行情数据，通过共享内存通道发送订单信息。
     - spscqueue_test.py: SPSC队列测试用例。
 
 

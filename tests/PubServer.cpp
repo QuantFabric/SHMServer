@@ -40,7 +40,7 @@ public:
         for(int j = 0; j < 100; j++)
         {
             Msg.MsgID = i++;
-            while(!m_SendQueue.Push(Msg));
+            while(!m_pSendQueue->Push(Msg));
         }
     }
 };

@@ -23,6 +23,9 @@ public:
         m_pInternalThread = nullptr;
         m_MsgID = 1;
         m_Stopped = false;
+
+        m_pSendQueue = new SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4>;
+        m_pRecvQueue = new SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4>;
     }
 
     virtual ~SHMServer() 
@@ -80,13 +83,13 @@ public:
         Msg.MsgType = EMsgType::EMSG_TYPE_DATA;
         Msg.TimeStamp = RDTSC();
         memcpy(&Msg.Data, &msg, sizeof(Msg.Data));
-        return m_SendQueue.Push(Msg);
+        return m_pSendQueue->Push(Msg);
     }
 
     bool Pop(T& msg)
     {
         static TChannelMsg<T> Msg;
-        bool ret = m_RecvQueue.Pop(Msg);
+        bool ret = m_pRecvQueue->Pop(Msg);
         if(ret && EMsgType::EMSG_TYPE_DATA == Msg.MsgType)
         {
             memcpy(&msg, &Msg.Data, sizeof(T));
@@ -122,7 +125,7 @@ public:
             // 发布消息到客户端
             while(true)
             {
-                bool ret = m_SendQueue.Pop(m_Msg);
+                bool ret = m_pSendQueue->Pop(m_Msg);
                 if(ret)
                 {
                     m_Msg.MsgID = m_MsgID++;
@@ -137,7 +140,8 @@ public:
                             }
                             else
                             {
-                                fprintf(stderr, "SHMServer Channel:%d ChannelName:%s SendQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
+                                fprintf(stderr, "SHMServer Channel:%d ChannelName:%s SendQueue full, misss Msg:%u\n", 
+                                        m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
                             }
                         }
                     }
@@ -179,6 +183,8 @@ public:
                     fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
                 }
             }
+            fflush(stdout); 
+            fflush(stderr);
         }
         // CS模式
         else
@@ -188,14 +194,16 @@ public:
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
+                    // fprintf(stdout, "SHMServer recv msg from Channnel:%d Msg:%u MsgType:%d\n", m_AllChannel[i].ChannelID, m_Msg.MsgID, m_Msg.MsgType);
                     m_Msg.MsgID = m_MsgID++;
                     m_AllChannel[i].TimeStamp = RDTSC();
                     if(EMsgType::EMSG_TYPE_DATA == m_Msg.MsgType)
                     {
-                        bool ret = m_RecvQueue.Push(m_Msg);
+                        bool ret = m_pRecvQueue->Push(m_Msg);
                         if(!ret)
                         {
-                            fprintf(stderr, "SHMServer Channel:%d ChannelName:%s m_RecvQueue full, misss Msg:%u\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
+                            fprintf(stderr, "SHMServer Channel:%d ChannelName:%s m_pRecvQueue full, misss Msg:%u\n", 
+                                    m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
                         }
                         // fprintf(stdout, "SHMServer recv Data from Channnel:%d Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
                     }
@@ -228,7 +236,7 @@ public:
             // 发送消息到客户端
             while(true)
             {
-                bool ret = m_SendQueue.Pop(m_Msg);
+                bool ret = m_pSendQueue->Pop(m_Msg);
                 if(ret)
                 {
                     m_Msg.MsgID = m_MsgID++;
@@ -251,6 +259,8 @@ public:
                     break;
                 }
             }
+            fflush(stdout); 
+            fflush(stderr);
         }
     }
 protected:
@@ -268,7 +278,7 @@ protected:
                 m_AllChannel[i].RecvQueue.Reset();
                 m_AllChannel[i].TimeStamp = RDTSC();
                 m_AllChannel[i].IsConnected = false;
-                fprintf(stdout, "SHMServer Init Channel:%d 0X%p\n", i, &m_AllChannel[i]);
+                fprintf(stdout, "SHMServer Init Channel:%d vaddr:%p\n", i, &m_AllChannel[i]);
             }
             fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
         }
@@ -333,16 +343,16 @@ protected:
     TChannelMsg<T> m_Msg;
     int32_t m_CPUID;
     uint64_t m_MsgID;
-    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_SendQueue;
-    static SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> m_RecvQueue;
+    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4>* m_pSendQueue;
+    SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4>* m_pRecvQueue;
 };
 
 // template <class T, class Conf> 
 // volatile bool SHMServer<T, Conf>::m_Stopped = false;
-template <class T, class Conf> 
-SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_SendQueue;
-template <class T, class Conf> 
-SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_RecvQueue;
+// template <class T, class Conf> 
+// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_pSendQueue;
+// template <class T, class Conf> 
+// SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize * 4> SHMServer<T, Conf>::m_pRecvQueue;
 
 } // namespace SHMIPC
 

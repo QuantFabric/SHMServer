@@ -35,9 +35,9 @@ public:
         while(true)
         {
             // 将接收客户端消息发送回客户端
-            if(m_RecvQueue.Pop(Msg))
+            if(m_pRecvQueue->Pop(Msg))
             {
-                if(!m_SendQueue.Push(Msg))
+                if(!m_pSendQueue->Push(Msg))
                 {
                     fprintf(stderr, "EchoServer::HandleMsg send msg failed, m_SendQueue full\n");
                     break;

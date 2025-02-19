@@ -26,8 +26,10 @@ public:
         strncpy(m_ClientName, clientName.c_str(), sizeof(m_ClientName) - 1);
         m_ClientName[sizeof(m_ClientName) - 1] = 0;
 
-        m_SendQueue.Reset();
-        m_RecvQueue.Reset();
+        m_pSendQueue = new SPSCQueue<T, Conf::ShmQueueSize>;
+        m_pRecvQueue = new SPSCQueue<T, Conf::ShmQueueSize>;
+        m_pSendQueue->Reset();
+        m_pRecvQueue->Reset();
 
         m_pWorkThread = nullptr;
         m_ChannelID = -1;
@@ -37,6 +39,7 @@ public:
 
         m_Stopped = false;
         m_IsConnected = false;
+
         // 注册信号处理函数
         auto signal_handler = [](int signal) {
             if(signal == SIGINT)
@@ -69,23 +72,25 @@ public:
     {
         m_ServerName = ServerName;
         m_CPUID = CPUID;
-        if(!Connect(ServerName))
+        if(!Connect(m_ServerName))
         {
-            fprintf(stderr, "SHMConnection::Start %s connect to %s failed\n", m_ClientName, ServerName.c_str());
-            return ;
+            fprintf(stderr, "SHMConnection::Start %s connect to %s failed\n", m_ClientName, m_ServerName.c_str());
+            fflush(stdout);
+            fflush(stderr);
+            exit(-1);
         }
         fprintf(stdout, "SHMConnection::Start %s connect to %s success by ChannelID:%d\n", m_ClientName, ServerName.c_str(), m_ChannelID);
-        Reset();
         m_LoginMsg.ChannelID = m_ChannelID;
         m_HeartBeatMsg.ChannelID = m_ChannelID;
         m_DataMsg.ChannelID = m_ChannelID;
+        Reset();
         // 发送登录请求
         m_Channel->SendQueue.Push(m_LoginMsg);
         fprintf(stdout, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         while(true)
         {
             static uint64_t TimeStamp = RDTSC();
-            TChannelMsg<T> Msg;
+            static TChannelMsg<T> Msg;
             if(m_Channel->RecvQueue.Pop(Msg))
             {
                 if(EMsgType::EMSG_TYPE_SERVER_ACK == Msg.MsgType)
@@ -111,7 +116,7 @@ public:
             fprintf(stderr, "SHMConnection::Start %s Connected to %s by Channel:%d failed\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
             fflush(stdout);
             fflush(stderr);
-            return ;
+            exit(-1);
         }
         fprintf(stdout, "SHMConnection::Start %s Connected to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         fflush(stdout); 
@@ -130,12 +135,12 @@ public:
 
     bool Push(const T& msg) 
     {
-        return m_SendQueue.Push(msg);
+        return m_pSendQueue->Push(msg);
     }
 
     bool Pop(T& msg) 
     {
-        return m_RecvQueue.Pop(msg);
+        return m_pRecvQueue->Pop(msg);
     }
 
     void Join()
@@ -159,18 +164,18 @@ public:
     void HandleMsg()
     {
         // 发送数据
-        if(m_SendQueue.Pop(m_DataMsg.Data))
+        if(m_pSendQueue->Pop(m_DataMsg.Data))
         {
             if(m_Channel->SendQueue.Push(m_DataMsg))
             {
                 // 发送消息时更新时间戳
                 m_TimeStamp = RDTSC();
-                // fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
             }
             else
             {
                 fprintf(stderr, "SHMConnection::HandleMsg %s send msg to %s failed by Channel:%d msg:%u\n", 
-                                m_ClientName, m_ServerName.c_str(), m_ChannelID, m_DataMsg.MsgID);
+                        m_ClientName, m_ServerName.c_str(), m_ChannelID, m_DataMsg.MsgID);
             }
         }
         // 接收数据
@@ -179,9 +184,9 @@ public:
             m_TimeStamp = RDTSC();
             if(EMsgType::EMSG_TYPE_DATA == m_DataMsg.MsgType)
             {
-                if(!m_RecvQueue.Push(m_DataMsg.Data))
+                if(!m_pRecvQueue->Push(m_DataMsg.Data))
                 {
-                    fprintf(stderr, "SHMConnection::HandleMsg %s recv msg failed from %s: m_RecvQueue full\n", m_ClientName, m_ServerName.c_str());
+                    fprintf(stderr, "SHMConnection::HandleMsg %s recv msg failed from %s: m_pRecvQueue full\n", m_ClientName, m_ServerName.c_str());
                 }
             }
         } 
@@ -213,7 +218,8 @@ protected:
                         m_Channel->RecvQueue.Reset();
                         m_ChannelID = m_Channel->ChannelID;
                         ret = true;
-                        fprintf(stdout, "SHMConnection:%s new Channel:%d success, ClientName: %s\n", ServerName.c_str(), i, m_ClientName);
+                        fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                ServerName.c_str(), i, m_Channel, m_ClientName);
                         break;
                     }
                     else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
@@ -223,7 +229,8 @@ protected:
                         m_Channel->RecvQueue.Reset();
                         m_ChannelID = m_Channel->ChannelID;
                         ret = true;
-                        fprintf(stdout, "SHMConnection:%s exist Channel:%d success, ClientName: %s\n", ServerName.c_str(), i, m_ClientName);
+                        fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                ServerName.c_str(), i,  m_Channel, m_ClientName);
                         break;
                     }
                 }
@@ -281,13 +288,11 @@ protected:
             m_Channel->SendQueue.Reset();
             m_Channel->RecvQueue.Reset();
         }
-        m_SendQueue.Reset();
-        m_RecvQueue.Reset();
+        m_pSendQueue->Reset();
+        m_pRecvQueue->Reset();
     }
-public:
-    SPSCQueue<T, Conf::ShmQueueSize> m_SendQueue;
-    SPSCQueue<T, Conf::ShmQueueSize> m_RecvQueue;
-private:
+
+protected:
     char m_ClientName[Conf::NameSize];
     int32_t m_ChannelID;
     std::string m_ServerName;
@@ -312,6 +317,8 @@ private:
     volatile bool m_Stopped;
     volatile bool m_IsConnected;
     uint64_t m_TimeStamp;
+    SPSCQueue<T, Conf::ShmQueueSize>* m_pSendQueue;
+    SPSCQueue<T, Conf::ShmQueueSize>* m_pRecvQueue;
 };
 
 

@@ -58,7 +58,7 @@ class MarketClient(object):
 
 
 if __name__ == "__main__":
-    client_name = "QuantServer"
+    client_name = "188795"
     server_name = "MarketServer"
     client = MarketClient(client_name, server_name)
     client.start()

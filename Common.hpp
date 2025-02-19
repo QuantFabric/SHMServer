@@ -48,12 +48,14 @@ T* shm_mmap(const char* filename, uint16_t ChannelSize)
     int fd = shm_open(filename, O_CREAT | O_RDWR, 0666);
     if(fd == -1) 
     {
-        printf("shm_open %s error\n", filename);
+        fprintf(stderr, "shm_open %s error\n", filename);
+        fflush(stderr);
         return nullptr;
     }
     if(ftruncate(fd, sizeof(T) * ChannelSize)) 
     {
-        printf("ftruncate %s error\n", filename);
+        fprintf(stderr, "ftruncate %s error\n", filename);
+        fflush(stderr);
         close(fd);
         return nullptr;
     }
@@ -61,7 +63,8 @@ T* shm_mmap(const char* filename, uint16_t ChannelSize)
     close(fd);
     if(ret == MAP_FAILED) 
     {
-        printf("mmap %s error\n", filename);
+        fprintf(stderr, "mmap %s error\n", filename);
+        fflush(stderr);
         return nullptr;
     }
     return ret;
@@ -71,6 +74,57 @@ template<class T>
 void shm_munmap(void* addr, uint16_t ChannelSize) 
 {
     munmap(addr, sizeof(T) * ChannelSize);
+}
+
+// 获取虚拟地址对应的物理地址
+static uint64_t vaddr_to_paddr(void *vaddr) 
+{
+    int fd = open("/proc/self/pagemap", O_RDONLY);
+    if (fd == -1) 
+    {
+        fprintf(stderr, "打开/proc/self/pagemap失败\n");
+        fflush(stderr);
+        return 0;
+    }
+
+    // 计算页大小和页内偏移
+    uint64_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t virtual_addr = (uintptr_t)vaddr;
+    uint64_t page_offset = virtual_addr / page_size;
+    uint64_t entry_offset = page_offset * sizeof(uint64_t);
+
+    // 定位到对应的页表条目
+    if (lseek(fd, entry_offset, SEEK_SET) == -1) 
+    {
+        fprintf(stderr, "lseek失败\n");
+        fflush(stderr);
+        close(fd);
+        return 0;
+    }
+
+    // 读取页表条目
+    uint64_t entry;
+    ssize_t bytes_read = read(fd, &entry, sizeof(entry));
+    if (bytes_read != sizeof(entry)) 
+    {
+        fprintf(stderr, "读取页表条目失败\n");
+        fflush(stderr);
+        close(fd);
+        return 0;
+    }
+    close(fd);
+
+    // 检查页面是否存在
+    if (!(entry & (1ULL << 63))) 
+    {
+        fprintf(stderr, "页面未驻留物理内存\n");
+        fflush(stderr);
+        return 0;
+    }
+
+    // 提取物理页帧号(PFN)
+    uint64_t pfn = entry & ((1ULL << 55) - 1);
+    return (pfn * page_size) + (virtual_addr % page_size);
 }
 
 static bool ThreadBind(pthread_t thread, int cpuid)
@@ -88,11 +142,11 @@ static inline uint64_t RDTSC()
     return ( (uint64_t)lo) | (((uint64_t)hi) << 32);
 }
 
-    static inline uint64_t RDTSCP() 
-    {
-        unsigned int d = 0;
-        return __builtin_ia32_rdtscp(&d);
-    }
+static inline uint64_t RDTSCP() 
+{
+    unsigned int d = 0;
+    return __builtin_ia32_rdtscp(&d);
+}
 
 } // namespace SHMIPC
 

@@ -13,12 +13,19 @@ class SHMServer(shm_server.SHMServer):
         ret = self.Pop(msg)
         if ret:
             self.Push(msg=msg)
+
+    def Run(self):
+        while True:
+            self.PollMsg()
+            self.HandleMsg()
     
 
 def TEST_shm_server():
+    
     try:
         server = SHMServer()
-        server.Start(server_name="shm_server_test", cpu_id=10)
+        server.Start(server_name="shm_server_test")
+        server.Run()
     except KeyboardInterrupt:
         server.Stop()
     

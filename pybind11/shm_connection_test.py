@@ -19,7 +19,7 @@ def print_msg(msg):
 
 def TEST_shm_connection():
     client = shm_connection.SHMConnection("188795")
-    client.Start(server_name="shm_server_test", cpu_id=-1)
+    client.Start(server_name="shm_server_test")
     while not client.IsConnected():
         client.HandleMsg()
         time.sleep(1)

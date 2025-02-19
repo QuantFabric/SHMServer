@@ -1,6 +1,5 @@
 from multiprocessing import Process, Queue, Manager, Event
 import shm_connection
-import shm_server
 import pack_message
 import time
 import signal
@@ -29,8 +28,6 @@ class HPPackClient(TcpPack.HP_TcpPackClient):
 
     def SendData(self, msg):
         self.Send(self.Client, msg)
-
-
 
             
 def print_msg(msg):
@@ -156,6 +153,7 @@ def print_msg(msg):
            
         print("UpdateTime", msg.AccountPosition.UpdateTime)
 
+
 def signal_handler(sig, frame):
     if sig == signal.SIGINT:
         print("收到SIGINT信号,正在退出...")
@@ -164,21 +162,66 @@ def signal_handler(sig, frame):
     
     sys.exit(0)
 
-class QuantServer(shm_server.SHMServer):
-    def __init__(self):
-        super().__init__()
+
+class QuantServer(object):
+    def __init__(self, strategy_name:str):
+        self.strategy_name = strategy_name
         self.data_connection = None
+        self.hp_pack_client = None
         self.msg = pack_message.PackMessage()
         self.account_info_dict = dict()
-            
-    def Run(self, market_server_name:str, quant_server_name:str):
-        register_client()
-        self.data_connection = shm_connection.SHMConnection(quant_server_name)
+        self.order_connection_dict = dict()
+
+    def ConnectToXWatcher(self, ip:str, port:int):
+        cmd = sys.executable + " " + " ".join(sys.argv)
+        app_log_path = os.environ.get('APP_LOG_PATH')
+        if app_log_path is None:
+            app_log_path = "./log/"
+        program_name = os.path.basename(os.path.realpath(__file__))
+        scripts = "nohup {} > {}/{}_run_{}.log 2>&1 &".format(cmd, app_log_path, program_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
+        print(f"{program_name} start:{scripts}")
+        self.hp_pack_client = HPPackClient()
+        self.hp_pack_client.Start(host=ip, port=port, head_flag=0x169, size=0XFFFF)
+        print(f"Connect to XWatcher:{ip}:{port}")
+        msg = pack_message.PackMessage()
+        msg.MessageType = pack_message.EMessageType.ELoginRequest
+        msg.LoginRequest.ClientType = pack_message.EClientType.EXQUANT
+        msg.LoginRequest.Account = self.strategy_name
+        self.hp_pack_client.SendData(msg.to_bytes())
+
+        msg = pack_message.PackMessage()
+        msg.MessageType = pack_message.EMessageType.EAppStatus
+        msg.AppStatus.Colo = ""
+        msg.AppStatus.Account = self.strategy_name
+        msg.AppStatus.AppName = program_name
+        msg.AppStatus.PID = os.getpid()
+        msg.AppStatus.Status = "Start"
+        msg.AppStatus.UsedCPURate = 0.50
+        msg.AppStatus.UsedMemSize = 500.0
+        msg.AppStatus.StartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        msg.AppStatus.LastStartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        msg.AppStatus.APIVersion = "1.0"
+        msg.AppStatus.StartScript = scripts
+        msg.AppStatus.UpdateTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        self.hp_pack_client.SendData(msg.to_bytes())
+
+    def ConnectToMarketServer(self, market_server_name:str):
+        # 连接MarketServer
+        self.data_connection = shm_connection.SHMConnection(self.strategy_name)
         self.data_connection.Start(market_server_name)
+        print(f"{self.strategy_name} Connect to MarketServer:{market_server_name}")
+
+    def ConnectToOrderServer(self, order_server_name:str, account_list:list):
+        # 连接XTrader
+        for account in account_list:
+            order_connection = shm_connection.SHMConnection(account)
+            self.order_connection_dict[account] = order_connection
+            order_connection.Start(order_server_name + account)
+            print(f"{account} Connect to XTrader:{order_server_name + account}")
+            
+    def Run(self):
         order_id = 1
         while True:
-            # 处理SHMServer消息数据
-            self.PollMsg()
             # 收取行情数据
             self.data_connection.HandleMsg()
             ret = self.data_connection.Pop(self.msg)
@@ -202,13 +245,11 @@ class QuantServer(shm_server.SHMServer):
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
                     order.OrderRequest.RecvMarketTime = self.msg.FutureMarketData.RecvLocalTime
                     order.OrderRequest.SendTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                    for account in self.account_info_dict.keys():
-                        order.OrderRequest.Colo = self.account_info_dict.get(account).get("Colo")
-                        order.OrderRequest.Broker = self.account_info_dict.get(account).get("Broker")
+                    for account, order_connection in self.order_connection_dict.items():
                         order.OrderRequest.Account = account
-                        order.ChannelID = self.account_info_dict.get(account).get("ChannelID", -1)
-                        self.Push(order)
-                        print(f"send buy order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} volume:{order.OrderRequest.Volume}")
+                        order_connection.Push(order)
+                        order_connection.HandleMsg()  # 发送订单到XTrader
+                        print(f"send buy order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken}")
                 elif self.msg.FutureMarketData.AskVolume1 > 100 and self.msg.FutureMarketData.BidVolume1 < 10:
                     order = pack_message.PackMessage()
                     order.MessageType = pack_message.EMessageType.EOrderRequest
@@ -225,39 +266,40 @@ class QuantServer(shm_server.SHMServer):
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
                     order.OrderRequest.RecvMarketTime = self.msg.FutureMarketData.RecvLocalTime
                     order.OrderRequest.SendTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                    for account in self.account_info_dict.keys():
-                        order.OrderRequest.Colo = self.account_info_dict.get(account).get("Colo")
-                        order.OrderRequest.Broker = self.account_info_dict.get(account).get("Broker")
+                    for account, order_connection in self.order_connection_dict.items():
                         order.OrderRequest.Account = account
-                        order.ChannelID = self.account_info_dict.get(account).get("ChannelID", -1)
-                        self.Push(order)
-                        print(f"send sell order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} volume:{order.OrderRequest.Volume}")
+                        order_connection.Push(order)
+                        order_connection.HandleMsg() # 发送订单到XTrader
+                        print(f"send sell order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken}")
 
             # 回报数据处理
-            while True:
-                ret = self.Pop(self.msg)
-                if ret:
-                    # print_msg(self.msg)
-                    if self.msg.MessageType == pack_message.EMessageType.EAccountFund:
-                        account_info_dict = dict()
-                        account_info_dict["Colo"] = self.msg.AccountFund.Colo
-                        account_info_dict["Broker"] = self.msg.AccountFund.Broker
-                        account_info_dict["Product"] = self.msg.AccountFund.Product
-                        account_info_dict["Account"] = self.msg.AccountFund.Account
-                        account_info_dict["ChannelID"] = self.msg.ChannelID
-                        self.account_info_dict[self.msg.AccountFund.Account] = account_info_dict
-                    elif self.msg.MessageType == pack_message.EMessageType.EAccountPosition:
-                        account_info_dict = dict()
-                        account_info_dict["Colo"] = self.msg.AccountPosition.Colo
-                        account_info_dict["Broker"] = self.msg.AccountPosition.Broker
-                        account_info_dict["Product"] = self.msg.AccountPosition.Product
-                        account_info_dict["Account"] = self.msg.AccountPosition.Account
-                        account_info_dict["ChannelID"] = self.msg.ChannelID
-                        self.account_info_dict[self.msg.AccountPosition.Account] = account_info_dict
-                    elif self.msg.MessageType == pack_message.EMessageType.EOrderStatus:
-                        pass
-                else:
-                    break
+            for account, order_connection in self.order_connection_dict.items():
+                while True:
+                    # 收取交易回报信息
+                    order_connection.HandleMsg()
+                    ret = order_connection.Pop(self.msg)
+                    if ret:
+                        # print_msg(self.msg)
+                        if self.msg.MessageType == pack_message.EMessageType.EAccountFund:
+                            account_info_dict = dict()
+                            account_info_dict["Colo"] = self.msg.AccountFund.Colo
+                            account_info_dict["Broker"] = self.msg.AccountFund.Broker
+                            account_info_dict["Product"] = self.msg.AccountFund.Product
+                            account_info_dict["Account"] = self.msg.AccountFund.Account
+                            account_info_dict["ChannelID"] = self.msg.ChannelID
+                            self.account_info_dict[self.msg.AccountFund.Account] = account_info_dict
+                        elif self.msg.MessageType == pack_message.EMessageType.EAccountPosition:
+                            account_info_dict = dict()
+                            account_info_dict["Colo"] = self.msg.AccountPosition.Colo
+                            account_info_dict["Broker"] = self.msg.AccountPosition.Broker
+                            account_info_dict["Product"] = self.msg.AccountPosition.Product
+                            account_info_dict["Account"] = self.msg.AccountPosition.Account
+                            account_info_dict["ChannelID"] = self.msg.ChannelID
+                            self.account_info_dict[self.msg.AccountPosition.Account] = account_info_dict
+                        elif self.msg.MessageType == pack_message.EMessageType.EOrderStatus:
+                            pass
+                    else:
+                        break
             
             # 定义目标时间
             target_time = datetime.time(15, 30, 0)  # 15:30:00
@@ -268,47 +310,6 @@ class QuantServer(shm_server.SHMServer):
                 print(f"当前时间:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，已经收盘，退出程序")
                 break
         sys.stdout.flush()
-    
-
-def register_client():
-    import struct
-    import sys
-    import os
-
-    cmd = sys.executable + " " + " ".join(sys.argv)
-    app_log_path = os.environ.get('APP_LOG_PATH')
-    if app_log_path is None:
-        app_log_path = "./log/"
-
-    account = 'SMAStrategy'
-    app_name = 'quant_server_test'
-    scripts = "nohup {} > {}/{}_{}_run.log 2>&1 &".format(cmd, app_log_path, app_name, account)
-
-    print(bytes(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'), 'utf-8'))
-    client = HPPackClient()
-    client.Start(host='192.168.1.168', port=8001, head_flag=0x169, size=0XFFFF)
-
-    msg = pack_message.PackMessage()
-    msg.MessageType = pack_message.EMessageType.ELoginRequest
-    msg.LoginRequest.ClientType = pack_message.EClientType.EXQUANT
-    msg.LoginRequest.Account = account
-    client.SendData(msg.to_bytes())
-
-    msg = pack_message.PackMessage()
-    msg.MessageType = pack_message.EMessageType.EAppStatus
-    msg.AppStatus.Colo = ""
-    msg.AppStatus.Account = account
-    msg.AppStatus.AppName = app_name
-    msg.AppStatus.PID = os.getpid()
-    msg.AppStatus.Status = "Start"
-    msg.AppStatus.UsedCPURate = 0.50
-    msg.AppStatus.UsedMemSize = 500.0
-    msg.AppStatus.StartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-    msg.AppStatus.LastStartTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-    msg.AppStatus.APIVersion = "1.0"
-    msg.AppStatus.StartScript = scripts
-    msg.AppStatus.UpdateTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-    client.SendData(msg.to_bytes())
 
 
 if __name__ == "__main__":
@@ -316,8 +317,11 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    quant_server_name = "QuantServer"
+    account_list = ["188795"]
     market_server_name = "MarketServer"
-    server = QuantServer()
-    server.Start(server_name=quant_server_name)
-    server.Run(market_server_name, quant_server_name)
+    order_server_name = "OrderServer"
+    server = QuantServer(strategy_name="SMAStrategy")
+    server.ConnectToXWatcher(ip="192.168.1.168", port=8001)
+    server.ConnectToMarketServer(market_server_name=market_server_name)
+    server.ConnectToOrderServer(order_server_name=order_server_name, account_list=account_list)
+    server.Run()

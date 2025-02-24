@@ -3,15 +3,7 @@
 - SHMServer是一个基于共享内存实现进程间通信的服务端，提供发布订阅模式和CS模式的通信。
 - 根据不同客户端划分通信信道，每个信道包含一个SPSC发送队列和SPSC接收队列，服务端的发送队列和接收队列分别对应一个客户端的接收队列和发送队列。
 - SPSC队列底层数据缓冲区大小在编译时固定，因此如果队列满时消息入队会失败，导致消息丢失，需要在服务器性能做压力测试后选择不同的队列大小，确保在压力测试时也不会出现消息丢失。
-- **SHMServer的SHMserver和SHMConnection组件使用时需要修改栈大小为16MB，否则会出现段错误**。
-    ```bash
-    ulimit -s 16384
-    ```
-- 操作系统栈大小设置/etc/security/limits.conf：
-    ```bash
-    * soft stack  8192
-    * hard stack 65536
-    ```
+
 - SHMConnection使用非性能模式时，Pop前需要执行HandleMsg回调函数，Push后需要执行HandleMsg回调函数，同时在程序的主循环内执行HandleMsg回调函数处理HEARBEAT消息。
 - SHMserver使用非性能模式时，从客户端接收数据前需要执行PollMsg回调函数，发送数据到客户端后需要执行PollMsg回调函数，同时在程序的主循环内执行PollMsg回调函数处理HEARBEAT消息。
 

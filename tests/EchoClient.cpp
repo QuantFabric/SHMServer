@@ -29,6 +29,7 @@ const uint64_t N = 10000000;
 
 struct ClientConf : public SHMIPC::CommonConf
 {
+    static const bool Publish = false;
     static const bool Performance = true;
 };
 

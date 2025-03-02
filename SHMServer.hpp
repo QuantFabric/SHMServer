@@ -129,7 +129,7 @@ public:
                 if(ret)
                 {
                     m_Msg.MsgID = m_MsgID++;
-                    for(uint16_t i = 0; i < Conf::ChannelSize; i++) 
+                    for(uint16_t i = 0; i < Conf::PubChannelSize; i++) 
                     {
                         if(m_AllChannel[i].IsConnected)
                         {
@@ -152,7 +152,7 @@ public:
                 }
             }
             // 接收客户端的控制类型消息
-            for(uint16_t i = 0; i < Conf::ChannelSize; i++) 
+            for(uint16_t i = 0; i < Conf::PubChannelSize; i++) 
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
@@ -267,24 +267,49 @@ protected:
     void InitChannel(const std::string& ServerName)
     {
         std::string shm_file = std::string("/") + ServerName + ".shm";
-        m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
-        if(m_AllChannel) 
+        if constexpr (Conf::Publish)
         {
-            for(int i = 0; i < Conf::ChannelSize; i++)
+            m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::PubChannelSize);
+            if(m_AllChannel) 
             {
-                memset(&m_AllChannel[i].ChannelName, 0, sizeof(m_AllChannel[i].ChannelName));
-                m_AllChannel[i].ChannelID = i;
-                m_AllChannel[i].SendQueue.Reset();
-                m_AllChannel[i].RecvQueue.Reset();
-                m_AllChannel[i].TimeStamp = RDTSC();
-                m_AllChannel[i].IsConnected = false;
-                fprintf(stdout, "SHMServer Init Channel:%d vaddr:%p\n", i, &m_AllChannel[i]);
+                for(int i = 0; i < Conf::PubChannelSize; i++)
+                {
+                    memset(&m_AllChannel[i].ChannelName, 0, sizeof(m_AllChannel[i].ChannelName));
+                    m_AllChannel[i].ChannelID = i;
+                    m_AllChannel[i].SendQueue.Reset();
+                    m_AllChannel[i].RecvQueue.Reset();
+                    m_AllChannel[i].TimeStamp = RDTSC();
+                    m_AllChannel[i].IsConnected = false;
+                    fprintf(stdout, "SHMServer Init Channel:%d vaddr:%p\n", i, &m_AllChannel[i]);
+                }
+                fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::PubChannelSize / 1024.0 / 1024.0);
             }
-            fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+            else
+            {
+                fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
+            }
         }
         else
         {
-            fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
+            m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
+            if(m_AllChannel) 
+            {
+                for(int i = 0; i < Conf::ChannelSize; i++)
+                {
+                    memset(&m_AllChannel[i].ChannelName, 0, sizeof(m_AllChannel[i].ChannelName));
+                    m_AllChannel[i].ChannelID = i;
+                    m_AllChannel[i].SendQueue.Reset();
+                    m_AllChannel[i].RecvQueue.Reset();
+                    m_AllChannel[i].TimeStamp = RDTSC();
+                    m_AllChannel[i].IsConnected = false;
+                    fprintf(stdout, "SHMServer Init Channel:%d vaddr:%p\n", i, &m_AllChannel[i]);
+                }
+                fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+            }
+            else
+            {
+                fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
+            }
         }
         fflush(stdout); 
         fflush(stderr);
@@ -294,7 +319,14 @@ protected:
     {
         if(m_AllChannel)
         {
-            shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
+            if constexpr (Conf::Publish)
+            {
+                shm_munmap<TChannel>(m_AllChannel, Conf::PubChannelSize);
+            }
+            else
+            {
+                shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
+            }
             m_AllChannel = nullptr;
         }
         if(m_pInternalThread)

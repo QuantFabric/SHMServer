@@ -3,9 +3,9 @@
 - SHMServer是一个基于共享内存实现进程间通信的服务端，提供发布订阅模式和CS模式的通信。
 - 根据不同客户端划分通信信道，每个信道包含一个SPSC发送队列和SPSC接收队列，服务端的发送队列和接收队列分别对应一个客户端的接收队列和发送队列。
 - SPSC队列底层数据缓冲区大小在编译时固定，因此如果队列满时消息入队会失败，导致消息丢失，需要在服务器性能做压力测试后选择不同的队列大小，确保在压力测试时也不会出现消息丢失。
-
+- SHMConnection为了适配服务端，也需要定义Publish发布订阅模式和CS模式，主要在于发布订阅模式对内存通道数量的需求要远大于CS模式。
 - SHMConnection使用非性能模式时，Pop前需要执行HandleMsg回调函数，Push后需要执行HandleMsg回调函数，同时在程序的主循环内执行HandleMsg回调函数处理HEARBEAT消息。
-- SHMserver使用非性能模式时，从客户端接收数据前需要执行PollMsg回调函数，发送数据到客户端后需要执行PollMsg回调函数，同时在程序的主循环内执行PollMsg回调函数处理HEARBEAT消息。
+- SHMServer使用非性能模式时，从客户端接收数据前需要执行PollMsg回调函数，发送数据到客户端后需要执行PollMsg回调函数，同时在程序的主循环内执行PollMsg回调函数处理HEARBEAT消息。
 
 ### Python扩展
 - **安装C Python API开发工具包**：
@@ -46,7 +46,7 @@
     ```
 
 - **Quant交易平台**：
-    - quant_server_test.py：QuantServer测试用例，QuantServer服务器，从共享内存通道接收行情数据，通过共享内存通道发送订单信息;初始化进程状态发送给XWatcher，实现进程监控。
+    - quant_server_test.py：量化交易策略测试用例，从共享内存通道接收行情数据，通过共享内存通道发送订单信息;初始化进程状态发送给XWatcher，实现进程监控。
 
 
 - **pybind11测试用例**：

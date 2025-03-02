@@ -1,4 +1,4 @@
-import shm_connection
+import shm_data_connection
 import pack_message
 import time
 import datetime
@@ -8,7 +8,7 @@ class MarketClient(object):
     def __init__(self, client_name, server_name):
         self.client_name = client_name
         self.server_name = server_name
-        self.shm_connection = shm_connection.SHMConnection(self.client_name)
+        self.shm_connection = shm_data_connection.SHMConnection(self.client_name)
         self.msg = pack_message.PackMessage()
         
     def start(self):

@@ -6,7 +6,7 @@ import signal
 import sys
 import datetime
 import os
-
+from loguru import logger # type: ignore
 from HPSocket import TcpPack
 from HPSocket import helper
 import HPSocket.pyhpsocket as HPSocket
@@ -16,15 +16,15 @@ class HPPackClient(TcpPack.HP_TcpPackClient):
 
     @EventDescription
     def OnSend(self, Sender, ConnID, Data):
-        print('[%d, OnSend] data len=%d' % (ConnID, len(Data)))
+        logger.info('[%d, OnSend] data len=%d' % (ConnID, len(Data)))
 
     @EventDescription
     def OnConnect(self, Sender, ConnID):
-        print('[%d, OnConnect] Success.' % ConnID)
+        logger.info('[%d, OnConnect] Success.' % ConnID)
 
     @EventDescription
     def OnReceive(self, Sender, ConnID, Data):
-        print('[%d, OnReceive] data len=%d' % (ConnID, len(Data)))
+        logger.info('[%d, OnReceive] data len=%d' % (ConnID, len(Data)))
 
     def SendData(self, msg):
         self.Send(self.Client, msg)
@@ -156,9 +156,9 @@ def print_msg(msg):
 
 def signal_handler(sig, frame):
     if sig == signal.SIGINT:
-        print("收到SIGINT信号,正在退出...")
+        logger.info("收到SIGINT信号,正在退出...")
     elif sig == signal.SIGTERM:
-        print("收到SIGTERM信号,正在退出...")
+        logger.info("收到SIGTERM信号,正在退出...")
     
     sys.exit(0)
 
@@ -166,6 +166,8 @@ def signal_handler(sig, frame):
 class QuantServer(object):
     def __init__(self, strategy_name:str):
         self.strategy_name = strategy_name
+        self.program_name = ""
+        self.strategy_id = 1
         self.data_connection = None
         self.hp_pack_client = None
         self.msg = pack_message.PackMessage()
@@ -177,12 +179,12 @@ class QuantServer(object):
         app_log_path = os.environ.get('APP_LOG_PATH')
         if app_log_path is None:
             app_log_path = "./log/"
-        program_name = os.path.basename(os.path.realpath(__file__))
-        scripts = "nohup {} > {}/{}_run_{}.log 2>&1 &".format(cmd, app_log_path, program_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
-        print(f"{program_name} start:{scripts}")
+        self.program_name = os.path.basename(os.path.realpath(__file__))
+        scripts = "nohup {} > {}/{}_run_{}.log 2>&1 &".format(cmd, app_log_path, self.program_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
+        logger.info(f"{self.program_name} start:{scripts}")
         self.hp_pack_client = HPPackClient()
         self.hp_pack_client.Start(host=ip, port=port, head_flag=0x169, size=0XFFFF)
-        print(f"Connect to XWatcher:{ip}:{port}")
+        logger.info(f"Connect to XWatcher:{ip}:{port}")
         msg = pack_message.PackMessage()
         msg.MessageType = pack_message.EMessageType.ELoginRequest
         msg.LoginRequest.ClientType = pack_message.EClientType.EXQUANT
@@ -193,7 +195,7 @@ class QuantServer(object):
         msg.MessageType = pack_message.EMessageType.EAppStatus
         msg.AppStatus.Colo = ""
         msg.AppStatus.Account = self.strategy_name
-        msg.AppStatus.AppName = program_name
+        msg.AppStatus.AppName = self.program_name
         msg.AppStatus.PID = os.getpid()
         msg.AppStatus.Status = "Start"
         msg.AppStatus.UsedCPURate = 0.50
@@ -207,9 +209,9 @@ class QuantServer(object):
 
     def ConnectToMarketServer(self, market_server_name:str):
         # 连接MarketServer
-        self.data_connection = shm_connection.SHMConnection(self.strategy_name)
+        self.data_connection = shm_connection.SHMDataConnection(self.strategy_name)
         self.data_connection.Start(market_server_name)
-        print(f"{self.strategy_name} Connect to MarketServer:{market_server_name}")
+        logger.info(f"{self.strategy_name} Connect to MarketServer:{market_server_name}")
 
     def ConnectToOrderServer(self, order_server_name:str, account_list:list):
         # 连接XTrader
@@ -217,16 +219,27 @@ class QuantServer(object):
             order_connection = shm_connection.SHMConnection(account)
             self.order_connection_dict[account] = order_connection
             order_connection.Start(order_server_name + account)
-            print(f"{account} Connect to XTrader:{order_server_name + account}")
+            logger.info(f"{account} Connect to XTrader:{order_server_name + account}")
             
     def Run(self):
+        # 发送EventLog
+        msg = pack_message.PackMessage()
+        msg.MessageType = pack_message.EMessageType.EEventLog
+        msg.EventLog.Colo = ""
+        msg.EventLog.Account = self.strategy_name
+        msg.EventLog.App = self.program_name
+        msg.EventLog.Event = f"{self.strategy_name} Start, accounts:{','.join(self.order_connection_dict.keys())}"
+        msg.EventLog.Level = pack_message.EEventLogLevel.EINFO
+        msg.EventLog.UpdateTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        self.hp_pack_client.SendData(msg.to_bytes())
+        
         order_id = 1
         while True:
             # 收取行情数据
             self.data_connection.HandleMsg()
             ret = self.data_connection.Pop(self.msg)
             if ret and self.msg.MessageType == pack_message.EMessageType.EFutureMarketData:
-                print(f"recv market data Ticker:{self.msg.FutureMarketData.Ticker} LastPrice:{self.msg.FutureMarketData.LastPrice}")
+                logger.info(f"recv market data Ticker:{self.msg.FutureMarketData.Ticker} LastPrice:{self.msg.FutureMarketData.LastPrice}")
                 # print_msg(self.msg)
                 # 策略信号
                 if self.msg.FutureMarketData.BidVolume1 > 100 and self.msg.FutureMarketData.AskVolume1 < 10:
@@ -241,7 +254,9 @@ class QuantServer(object):
                     order.OrderRequest.OrderToken = order_id
                     order_id += 1
                     order.OrderRequest.Direction = pack_message.EOrderDirection.EBUY
-                    order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
+                    # order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
+                    order.OrderRequest.Offset = 0
+                    order.OrderRequest.EngineID = self.strategy_id
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
                     order.OrderRequest.RecvMarketTime = self.msg.FutureMarketData.RecvLocalTime
                     order.OrderRequest.SendTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -249,7 +264,7 @@ class QuantServer(object):
                         order.OrderRequest.Account = account
                         order_connection.Push(order)
                         order_connection.HandleMsg()  # 发送订单到XTrader
-                        print(f"send buy order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken}")
+                        logger.info(f"send buy order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken} Direction:{order.OrderRequest.Direction} Offset:{order.OrderRequest.Offset}")
                 elif self.msg.FutureMarketData.AskVolume1 > 100 and self.msg.FutureMarketData.BidVolume1 < 10:
                     order = pack_message.PackMessage()
                     order.MessageType = pack_message.EMessageType.EOrderRequest
@@ -262,7 +277,9 @@ class QuantServer(object):
                     order.OrderRequest.OrderToken = order_id
                     order_id += 1
                     order.OrderRequest.Direction = pack_message.EOrderDirection.ESELL
-                    order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
+                    # order.OrderRequest.Offset = pack_message.EOrderOffset.EOPEN
+                    order.OrderRequest.Offset = 0
+                    order.OrderRequest.EngineID = self.strategy_id
                     order.OrderRequest.RiskStatus = pack_message.ERiskStatusType.EPREPARE_CHECKED
                     order.OrderRequest.RecvMarketTime = self.msg.FutureMarketData.RecvLocalTime
                     order.OrderRequest.SendTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -270,7 +287,7 @@ class QuantServer(object):
                         order.OrderRequest.Account = account
                         order_connection.Push(order)
                         order_connection.HandleMsg() # 发送订单到XTrader
-                        print(f"send sell order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken}")
+                        logger.info(f"send sell order to {account} ChannelID:{order.ChannelID} {order.OrderRequest.Ticker} price:{order.OrderRequest.Price} orderid:{order.OrderRequest.OrderToken} Direction:{order.OrderRequest.Direction} Offset:{order.OrderRequest.Offset}")
 
             # 回报数据处理
             for account, order_connection in self.order_connection_dict.items():
@@ -279,7 +296,7 @@ class QuantServer(object):
                     order_connection.HandleMsg()
                     ret = order_connection.Pop(self.msg)
                     if ret:
-                        # print_msg(self.msg)
+                        print_msg(self.msg)
                         if self.msg.MessageType == pack_message.EMessageType.EAccountFund:
                             account_info_dict = dict()
                             account_info_dict["Colo"] = self.msg.AccountFund.Colo
@@ -307,20 +324,27 @@ class QuantServer(object):
             now = datetime.datetime.now().time()  # 获取当前时间部分
             # 比较时间
             if now > target_time:
-                print(f"当前时间:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，已经收盘，退出程序")
+                logger.info(f"当前时间:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，已经收盘，退出程序")
                 break
         sys.stdout.flush()
 
 
 if __name__ == "__main__":
-
+    output_path = os.path.join(os.getcwd(), 'output')
+    strategy_name = "SMAStrategy"
+    logger.remove()
+    # 输出至标准输出
+    logger.add(sys.stdout, level="DEBUG")
+    # 输出至日志文件
+    logger.add(f"{output_path}/{strategy_name}_{datetime.datetime.now().strftime('%Y%m%d')}.log", level="DEBUG", rotation="500 MB")
+    
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    account_list = ["188795"]
+    account_list = ["188795", "237477"]
     market_server_name = "MarketServer"
     order_server_name = "OrderServer"
-    server = QuantServer(strategy_name="SMAStrategy")
+    server = QuantServer(strategy_name=strategy_name)
     server.ConnectToXWatcher(ip="192.168.1.168", port=8001)
     server.ConnectToMarketServer(market_server_name=market_server_name)
     server.ConnectToOrderServer(order_server_name=order_server_name, account_list=account_list)

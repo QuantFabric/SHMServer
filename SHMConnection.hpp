@@ -205,42 +205,86 @@ protected:
         std::string shm_file = std::string("/") + ServerName + ".shm";
         if(!m_AllChannel) 
         {
-            m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
-            if(m_AllChannel) 
+            if constexpr (Conf::Publish)
             {
-                for(int i = 0; i < Conf::ChannelSize; i++)
+                m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::PubChannelSize);
+                if(m_AllChannel) 
                 {
-                    if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
+                    for(int i = 0; i < Conf::PubChannelSize; i++)
                     {
-                        m_Channel = &m_AllChannel[i];
-                        strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
-                        m_Channel->SendQueue.Reset();
-                        m_Channel->RecvQueue.Reset();
-                        m_ChannelID = m_Channel->ChannelID;
-                        ret = true;
-                        fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                ServerName.c_str(), i, m_Channel, m_ClientName);
-                        break;
+                        if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
+                        {
+                            m_Channel = &m_AllChannel[i];
+                            strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
+                            m_Channel->SendQueue.Reset();
+                            m_Channel->RecvQueue.Reset();
+                            m_ChannelID = m_Channel->ChannelID;
+                            ret = true;
+                            fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                    ServerName.c_str(), i, m_Channel, m_ClientName);
+                            break;
+                        }
+                        else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
+                        {
+                            m_Channel = &m_AllChannel[i];
+                            m_Channel->SendQueue.Reset();
+                            m_Channel->RecvQueue.Reset();
+                            m_ChannelID = m_Channel->ChannelID;
+                            ret = true;
+                            fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                    ServerName.c_str(), i,  m_Channel, m_ClientName);
+                            break;
+                        }
                     }
-                    else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
+                    if(ret)
                     {
-                        m_Channel = &m_AllChannel[i];
-                        m_Channel->SendQueue.Reset();
-                        m_Channel->RecvQueue.Reset();
-                        m_ChannelID = m_Channel->ChannelID;
-                        ret = true;
-                        fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                ServerName.c_str(), i,  m_Channel, m_ClientName);
-                        break;
+                        fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::PubChannelSize / 1024.0 / 1024.0);
+                    }
+                    else
+                    {
+                        fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
                     }
                 }
-                if(ret)
+            }
+            else
+            {
+                m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
+                if(m_AllChannel) 
                 {
-                    fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
-                }
-                else
-                {
-                    fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
+                    for(int i = 0; i < Conf::ChannelSize; i++)
+                    {
+                        if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
+                        {
+                            m_Channel = &m_AllChannel[i];
+                            strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
+                            m_Channel->SendQueue.Reset();
+                            m_Channel->RecvQueue.Reset();
+                            m_ChannelID = m_Channel->ChannelID;
+                            ret = true;
+                            fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                    ServerName.c_str(), i, m_Channel, m_ClientName);
+                            break;
+                        }
+                        else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
+                        {
+                            m_Channel = &m_AllChannel[i];
+                            m_Channel->SendQueue.Reset();
+                            m_Channel->RecvQueue.Reset();
+                            m_ChannelID = m_Channel->ChannelID;
+                            ret = true;
+                            fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
+                                    ServerName.c_str(), i,  m_Channel, m_ClientName);
+                            break;
+                        }
+                    }
+                    if(ret)
+                    {
+                        fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
+                    }
+                    else
+                    {
+                        fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
+                    }
                 }
             }
         }
@@ -270,7 +314,14 @@ protected:
     {
         if(m_AllChannel) 
         {
-            shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
+            if constexpr (Conf::Publish)
+            {
+                shm_munmap<TChannel>(m_AllChannel, Conf::PubChannelSize);
+            }
+            else
+            {
+                shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
+            }
             m_AllChannel = nullptr;
             m_Channel = nullptr;
         }

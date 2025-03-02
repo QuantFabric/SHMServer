@@ -403,23 +403,6 @@ def TEST_TAccountPosition():
     print("UpdateTime", position.UpdateTime)
     print("\n")
 
-struct TAppStatus
-{
-    char Colo[16];
-    char Account[16];
-    char AppName[32];
-    int PID;
-    char Status[16];
-    double UsedCPURate;
-    double UsedMemSize;
-    char StartTime[32];
-    char LastStartTime[32];
-    char CommitID[16];
-    char UtilsCommitID[16];
-    char APIVersion[32];
-    char StartScript[400];
-    char UpdateTime[32];
-};
 
 def TEST_TAppStatus():
     print("Test TAppStatus...")

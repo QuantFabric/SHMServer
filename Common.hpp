@@ -15,8 +15,9 @@ namespace SHMIPC{
 struct CommonConf
 {
     static const uint32_t NameSize = 32;
-    static const uint32_t ShmQueueSize = 1024 * 8; 
-    static const uint32_t ChannelSize = 8;
+    static const uint32_t ShmQueueSize = 1024 * 8; // 队列大小
+    static const uint32_t ChannelSize = 8; // 交易账户数量
+    static const uint32_t PubChannelSize = 256; // 交易策略数量
     static const uint64_t Heartbeat_Interval = 5 * 60 * 1000 * 1000 * 1000UL;
 };
 

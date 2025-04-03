@@ -196,6 +196,7 @@ public:
             m_TimeStamp = RDTSC();
             m_Channel->SendQueue.Push(m_HeartBeatMsg);
             fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, m_TimeStamp);
+            fflush(stdout);
         }
     }
 protected:

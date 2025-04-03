@@ -170,6 +170,7 @@ public:
                     {
                         m_AllChannel[i].IsConnected = true;
                         fprintf(stdout, "SHMServer recv CLIENT_ACK from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
+                        Push_Init_Data(m_AllChannel[i].ChannelID);
                     }
                     else if(EMsgType::EMSG_TYPE_HEARTBEAT == m_Msg.MsgType)
                     {
@@ -220,6 +221,7 @@ public:
                     {
                         m_AllChannel[i].IsConnected = true;
                         fprintf(stdout, "SHMServer recv CLIENT_ACK from Channel:%d ChannelName:%s\n", m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName);
+                        Push_Init_Data(m_AllChannel[i].ChannelID);
                     }
                     else if(EMsgType::EMSG_TYPE_HEARTBEAT == m_Msg.MsgType)
                     {
@@ -313,6 +315,11 @@ protected:
         }
         fflush(stdout); 
         fflush(stderr);
+    }
+
+    virtual void Push_Init_Data(uint16_t ChannelID)
+    {
+        
     }
 
     void Release()

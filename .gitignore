@@ -3,3 +3,5 @@
 /tests/build
 /*.log
 /pybind11/build
+/python/build
+/python/dist

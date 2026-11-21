@@ -147,12 +147,11 @@ public:
         if(ret)
         {
             m_TimeStamp.store(dataMsg.TimeStamp, std::memory_order_relaxed);
-            fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n",
-                    m_ClientName, m_ServerName.c_str(), m_ChannelID);
+            // fprintf(stdout, "SHMConnection::Push %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         }
         else
         {
-            fprintf(stderr, "SHMConnection::HandleMsg %s send msg to %s failed by Channel:%d msg:%lu\n",
+            fprintf(stderr, "SHMConnection::Push %s send msg to %s failed by Channel:%d msg:%lu\n",
                     m_ClientName, m_ServerName.c_str(), m_ChannelID, static_cast<unsigned long>(dataMsg.MsgID));
         }
         return ret;
@@ -216,7 +215,7 @@ protected:
             m_TimeStamp.store(heartbeatTimestamp, std::memory_order_relaxed);
             m_HeartBeatMsg.TimeStamp = heartbeatTimestamp;
             SendControlMsg(m_HeartBeatMsg);
-            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, heartbeatTimestamp);
+            fprintf(stdout, "SHMConnection::HandleControlMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, heartbeatTimestamp);
             fflush(stdout);
         }
     }
@@ -237,7 +236,7 @@ protected:
 
         if(m_SharedRegion->Version.load(std::memory_order_acquire) != SharedRegion::CurrentVersion)
         {
-            fprintf(stderr, "SHMConnection %s layout version mismatch %#X, rebuild server and client\n", m_ClientName, SharedRegion::CurrentVersion);
+            fprintf(stderr, "SHMConnection::Connect %s layout version mismatch %#X, rebuild server and client\n", m_ClientName, SharedRegion::CurrentVersion);
             shm_munmap<SharedRegion>(m_SharedRegion, 1);
             m_SharedRegion = nullptr;
             return false;
@@ -257,7 +256,7 @@ protected:
                 m_Channel->ControlRecvQueue.Reset();
                 m_ChannelID = m_Channel->ChannelID;
                 ret = true;
-                fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n",
+                fprintf(stdout, "SHMConnection::Connect %s new Channel:%d vaddr:%p success, ClientName: %s\n",
                         ServerName.c_str(), i, static_cast<const void*>(m_Channel), m_ClientName);
                 break;
             }
@@ -270,19 +269,19 @@ protected:
                 m_Channel->ControlRecvQueue.Reset();
                 m_ChannelID = m_Channel->ChannelID;
                 ret = true;
-                fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n",
+                fprintf(stdout, "SHMConnection::Connect %s exist Channel:%d vaddr:%p success, ClientName: %s\n",
                         ServerName.c_str(), i, static_cast<const void*>(m_Channel), m_ClientName);
                 break;
             }
         }
         if(ret)
         {
-            fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n",
+            fprintf(stdout, "SHMConnection::Connect %s connect to %s success, %.2f MB\n",
                     m_ClientName, ServerName.c_str(), sizeof(SharedRegion) / 1024.0 / 1024.0);
         }
         else
         {
-            fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
+            fprintf(stderr, "SHMConnection::Connect %s connect to %s failed\n", m_ClientName, ServerName.c_str());
         }
         return ret;
     }

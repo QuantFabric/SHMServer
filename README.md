@@ -264,44 +264,41 @@ cmake --build SHMServer/tests/build \
 - `SHMIPerformanceBenchmark`覆盖128B/256B/512B/1024B数据；CS模式测试1/2/5/10客户端，Publish模式测试1/5客户端以及32/64/128/256独立客户端进程。
 
 ### Python扩展
-- **安装C Python API开发工具包**：
-    ```
-    yum install python3-devel
-    ```
-- **pybind11安装**：
-    ```bash
-    git clone git@github.com:pybind/pybind11.git  pybind11
-    cd pybind11
-    mkdir build
-    cd build
-    cmake ..
-    cmake --build . --config Release --target check
-    make
-    make install
-    ```
-- pybind11编译时需要将PATH环境变量的python版本设置为python3，如`export PATH=/usr/local/anaconda3/bin/:/usr/local/cmake-3.24.2/bin:$PATH`,否则会导致类似错误：
-    ```bash
-    -- pybind11 v2.14.0 dev1
-    -- CMake 3.24.2
-    CMake Error at /usr/local/cmake-3.24.2/share/cmake-3.24/Modules/FindPackageHandleStandardArgs.cmake:230 (message):
-    Could NOT find Python: Found unsuitable version "3.6.8", but required is at
-    least "3.8" (found /usr/bin/python3, found components: Interpreter
-    Development.Module Development.Embed)
-    Call Stack (most recent call first):
-    /usr/local/cmake-3.24.2/share/cmake-3.24/Modules/FindPackageHandleStandardArgs.cmake:592 (_FPHSA_FAILURE_MESSAGE)
-    /usr/local/cmake-3.24.2/share/cmake-3.24/Modules/FindPython/Support.cmake:3203 (find_package_handle_standard_args)
-    /usr/local/cmake-3.24.2/share/cmake-3.24/Modules/FindPython.cmake:519 (include)
-    tools/pybind11NewTools.cmake:54 (find_package)
-    tools/pybind11Common.cmake:195 (include)
-    CMakeLists.txt:232 (include)
-    ```
 
+当前 Python 绑定位于 `SHMServer/python`，使用 SWIG 生成，模块名和主要
+Python 接口与原有 pybind11 绑定保持一致。构建主机需要 Python 3.9+
+开发头文件、CMake、C++17 编译器和 SWIG 4.0+，运行时需要 NumPy。
+CMake 会自动调用 SWIG，将包装代码生成到 `build/generated`，无需提前
+生成或提交 `*_wrap.cxx`。
 
-- **pybind11测试用例**：
-    - shm_server_test.py：SHMServer测试用例。
-    - shm_connection_test.py：SHMConnection测试用例，连接SHMServer服务器。
-    - market_client_test.py：行情客户端测试用例，可以连接XMarketCenter行情服务，从共享内存通道接收行情数据。
-    - spscqueue_test.py: SPSC队列测试用例。
+```bash
+cd SHMServer/python
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+运行时设置：
+
+```bash
+export PYTHONPATH=/path/to/QuantFabric/SHMServer/python/build:/path/to/QuantFabric/SHMServer/python/build/generated:$PYTHONPATH
+```
+
+生成模块包括 `pack_message`、`shm_server`、`shm_connection` 和
+`spscqueue`，扩展文件名包含 Python ABI 后缀。也可通过
+`scikit-build-core` 构建并安装 wheel：
+
+```bash
+cd SHMServer/python
+python3 -m pip wheel . --no-deps --wheel-dir dist
+python3 -m pip install --force-reinstall dist/shmserver-0.1.0-*.whl
+```
+
+详细依赖、构建期 SWIG 生成、wheel/sdist 打包和使用示例见
+`SHMServer/python/README.md`。
+
+原有 `SHMServer/pybind11` 目录继续保留用于对照和回退，不参与新的 SWIG
+构建。
 
 
 

@@ -1,0 +1,56 @@
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "shmserver"
+version = "0.1.0"
+description = "QuantFabric SHMServer shared-memory IPC Python bindings"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "QuantFabric" },
+]
+dependencies = [
+    "numpy",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Distributed Computing",
+]
+
+[project.urls]
+Repository = "https://github.com/QuantFabric/SHMServer"
+
+[tool.scikit-build]
+cmake.version = ">=3.16"
+wheel.packages = []
+sdist.include = [
+    "*.i",
+    "CMakeLists.txt",
+    "SHMSwig.hpp",
+    "generate_bindings.sh",
+    "tests/*.py",
+]
+sdist.exclude = [
+    "build/**",
+    "dist/**",
+    "__pycache__/**",
+    "*.py[cod]",
+]
+
+[tool.scikit-build.sdist.force-include]
+"../Common.hpp" = "vendor/SHMServer/Common.hpp"
+"../MPMCQueue.hpp" = "vendor/SHMServer/MPMCQueue.hpp"
+"../SHMConnection.hpp" = "vendor/SHMServer/SHMConnection.hpp"
+"../SHMServer.hpp" = "vendor/SHMServer/SHMServer.hpp"
+"../SPSCQueue.hpp" = "vendor/SHMServer/SPSCQueue.hpp"
+"../../Utils/MarketData.hpp" = "vendor/Utils/MarketData.hpp"
+"../../Utils/PackMessage.hpp" = "vendor/Utils/PackMessage.hpp"
+"../../Utils/Util.hpp" = "vendor/Utils/Util.hpp"

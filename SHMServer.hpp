@@ -66,7 +66,7 @@ public:
         if constexpr (Conf::Performance)
         {
             // 启动线程
-            fprintf(stdout, "Start SHMServer InternalThread Publish:%d\n", Conf::Publish);
+            fprintf(stdout, "SHMServer::Start InternalThread Publish:%d\n", Conf::Publish);
             fflush(stdout); 
             fflush(stderr);
             m_pInternalThread = new std::thread(&SHMServer::WorkFunc, this);
@@ -146,7 +146,7 @@ public:
                             }
                             else
                             {
-                                fprintf(stderr, "SHMServer Channel:%d ChannelName:%s SendQueue full, misss Msg:%u\n", 
+                                fprintf(stderr, "SHMServer::PollMsg Channel:%d ChannelName:%s SendQueue full, misss Msg:%u\n", 
                                         m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
                             }
                         }
@@ -168,7 +168,7 @@ public:
             {
                 if(m_AllChannel[i].RecvQueue.Pop(m_Msg))
                 {
-                    // fprintf(stdout, "SHMServer recv msg from Channnel:%d Msg:%u MsgType:%d\n", m_AllChannel[i].ChannelID, m_Msg.MsgID, m_Msg.MsgType);
+                    // fprintf(stdout, "SHMServer::PollMsg recv msg from Channnel:%d Msg:%u MsgType:%d\n", m_AllChannel[i].ChannelID, m_Msg.MsgID, m_Msg.MsgType);
                     m_Msg.MsgID = m_MsgID++;
                     m_AllChannel[i].TimeStamp = RDTSC();
                     if(EMsgType::EMSG_TYPE_DATA == m_Msg.MsgType)
@@ -176,10 +176,10 @@ public:
                         bool ret = m_pRecvQueue->Push(m_Msg);
                         if(!ret)
                         {
-                            fprintf(stderr, "SHMServer Channel:%d ChannelName:%s m_pRecvQueue full, misss Msg:%u\n", 
+                            fprintf(stderr, "SHMServer::PollMsg Channel:%d ChannelName:%s m_pRecvQueue full, misss Msg:%u\n", 
                                     m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, m_Msg.MsgID);
                         }
-                        // fprintf(stdout, "SHMServer recv Data from Channnel:%d Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
+                        // fprintf(stdout, "SHMSHMServer::PollMsgServer recv Data from Channnel:%d Msg:%u\n", m_AllChannel[i].ChannelID, m_Msg.MsgID);
                     }
                 }
             }
@@ -196,11 +196,11 @@ public:
                         if(ret)
                         {
                             m_AllChannel[m_Msg.ChannelID].TimeStamp = RDTSC();
-                            // fprintf(stdout, "SHMServer send Data from Channnel:%d Msg:%u\n", m_AllChannel[m_Msg.ChannelID].ChannelID, m_Msg.MsgID);
+                            // fprintf(stdout, "SHMServer::PollMsg send Data from Channnel:%d Msg:%u\n", m_AllChannel[m_Msg.ChannelID].ChannelID, m_Msg.MsgID);
                         }
                         else
                         {
-                            fprintf(stderr, "SHMServer Channel:%u ChannelName:%s SendQueue full, miss Msg:%u\n", m_Msg.ChannelID, m_AllChannel[m_Msg.ChannelID].ChannelName, m_Msg.MsgID);
+                            fprintf(stderr, "SHMServer::PollMsg Channel:%u ChannelName:%s SendQueue full, miss Msg:%u\n", m_Msg.ChannelID, m_AllChannel[m_Msg.ChannelID].ChannelName, m_Msg.MsgID);
                         }
                     }
                 }
@@ -239,7 +239,7 @@ protected:
                 && m_AllChannel[i].TimeStamp + Conf::Heartbeat_Interval < RDTSC())
             {
                 m_AllChannel[i].IsConnected.store(false, std::memory_order_release);
-                fprintf(stderr, "SHMServer Channel:%d ChannelName:%s disconnect%s\n",
+                fprintf(stderr, "SHMServer::PollControlMessages Channel:%d ChannelName:%s disconnect%s\n",
                         m_AllChannel[i].ChannelID, m_AllChannel[i].ChannelName, Conf::Publish ? "" : " for timeout");
             }
         }
@@ -249,24 +249,24 @@ protected:
     {
         if(EMsgType::EMSG_TYPE_HEARTBEAT == control.MsgType)
         {
-            fprintf(stdout, "SHMServer recv HEARTBEAT from Channel:%d ChannelName:%s\n",
+            fprintf(stdout, "SHMServer::HandleControlMsg recv HEARTBEAT from Channel:%d ChannelName:%s\n",
                     channel.ChannelID, channel.ChannelName);
         }
         else if(EMsgType::EMSG_TYPE_LOGIN == control.MsgType)
         {
-            fprintf(stdout, "SHMServer recv LOGIN from Channel:%d ChannelName:%s\n",
+            fprintf(stdout, "SHMServer::HandleControlMsg recv LOGIN from Channel:%d ChannelName:%s\n",
                     channel.ChannelID, channel.ChannelName);
             TControlMsg serverAck{};
             serverAck.MsgType = EMsgType::EMSG_TYPE_SERVER_ACK;
             serverAck.ChannelID = channel.ChannelID;
             channel.ControlSendQueue.Push(serverAck);
-            fprintf(stdout, "SHMServer send SERVER_ACK to Channel:%d ChannelName:%s\n",
+            fprintf(stdout, "SHMServer::HandleControlMsg send SERVER_ACK to Channel:%d ChannelName:%s\n",
                     channel.ChannelID, channel.ChannelName);
         }
         else if(EMsgType::EMSG_TYPE_CLIENT_ACK == control.MsgType)
         {
             channel.IsConnected.store(true, std::memory_order_release);
-            fprintf(stdout, "SHMServer recv CLIENT_ACK from Channel:%d ChannelName:%s\n",
+            fprintf(stdout, "SHMServer::HandleControlMsg recv CLIENT_ACK from Channel:%d ChannelName:%s\n",
                     channel.ChannelID, channel.ChannelName);
             Push_Init_Data(channel.ChannelID);
         }
@@ -292,14 +292,14 @@ protected:
                 m_LastControlGeneration[i] = 0;
                 m_AllChannel[i].TimeStamp = RDTSC();
                 m_AllChannel[i].IsConnected.store(false, std::memory_order_relaxed);
-                fprintf(stdout, "SHMServer Init Channel:%d vaddr:%p\n", i, static_cast<const void*>(&m_AllChannel[i]));
+                fprintf(stdout, "SHMServer::InitChannel Init Channel:%d vaddr:%p\n", i, static_cast<const void*>(&m_AllChannel[i]));
             }
             m_SharedRegion->Version.store(SharedRegion::CurrentVersion, std::memory_order_release);
-            fprintf(stdout, "SHMServer Init %s done %.2f MB\n", ServerName.c_str(), sizeof(SharedRegion) / 1024.0 / 1024.0);
+            fprintf(stdout, "SHMServer::InitChannel Init %s done %.2f MB\n", ServerName.c_str(), sizeof(SharedRegion) / 1024.0 / 1024.0);
         }
         else
         {
-            fprintf(stderr, "SHMServer %s Init Channel failed\n", ServerName.c_str());
+            fprintf(stderr, "SHMServer::InitChannel %s Init Channel failed\n", ServerName.c_str());
         }
         fflush(stdout); 
         fflush(stderr);

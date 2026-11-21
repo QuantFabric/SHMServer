@@ -20,7 +20,6 @@ class MarketClient(object):
         print(f"Client {self.client_name} Satrt recv data from {self.server_name}")
         # 收取行情数据
         while True:
-            self.shm_connection.HandleMsg()
             if self.shm_connection.Pop(self.msg):
                 if self.msg.MessageType == pack_message.EMessageType.EFutureMarketData:
                     self.print_msg(self.msg)

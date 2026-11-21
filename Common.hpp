@@ -7,8 +7,10 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <atomic>
 #include <thread>
 #include <sched.h>
+#include "SPSCQueue.hpp"
 
 namespace SHMIPC{
 
@@ -18,6 +20,7 @@ struct CommonConf
     static const uint32_t ShmQueueSize = 1024 * 8; // 队列大小
     static const uint32_t ChannelSize = 8; // 交易账户数量
     static const uint32_t PubChannelSize = 256; // 交易策略数量
+    static const uint32_t ControlQueueSize = 64;
     static const uint64_t Heartbeat_Interval = 5 * 60 * 1000 * 1000 * 1000UL;
 };
 
@@ -31,14 +34,46 @@ enum EMsgType
     EMSG_TYPE_HEARTBEAT = 10,
 };
 
+struct TControlMsg
+{
+    uint32_t MsgType;
+    int32_t ChannelID;
+    uint64_t MsgID;
+    uint64_t TimeStamp;
+};
+
 template <class T>
-struct TChannelMsg
+struct TDataMsg
 {
     uint32_t MsgType;
     uint64_t MsgID;
     uint64_t TimeStamp;
     int32_t ChannelID;
     T Data;
+};
+
+template <class T, class Conf>
+struct alignas(128) TSharedChannel
+{
+    char ChannelName[Conf::NameSize];
+    int32_t ChannelID = -1;
+    std::atomic<bool> IsConnected{false};
+    uint64_t TimeStamp;
+    alignas(128) SPSCQueue<TDataMsg<T>, Conf::ShmQueueSize> SendQueue;
+    alignas(128) SPSCQueue<TDataMsg<T>, Conf::ShmQueueSize> RecvQueue;
+    alignas(128) SPSCQueue<TControlMsg, Conf::ControlQueueSize> ControlSendQueue;
+    alignas(128) std::atomic<uint64_t> ControlGeneration;
+    alignas(128) SPSCQueue<TControlMsg, Conf::ControlQueueSize> ControlRecvQueue;
+};
+
+template <class T, class Conf>
+struct alignas(128) TSharedRegion
+{
+    static constexpr uint32_t ChannelCapacity = Conf::Publish ? Conf::PubChannelSize : Conf::ChannelSize;
+    static constexpr uint64_t CurrentVersion = 0xFF01ULL;
+
+    alignas(128) std::atomic<uint64_t> Version;
+    TSharedChannel<T, Conf> Channels[ChannelCapacity];
 };
 
 
@@ -66,6 +101,33 @@ T* shm_mmap(const char* filename, uint16_t ChannelSize)
     {
         fprintf(stderr, "mmap %s error\n", filename);
         fflush(stderr);
+        return nullptr;
+    }
+    return ret;
+}
+
+template<class T>
+T* shm_mmap_existing(const char* filename)
+{
+    const int fd = shm_open(filename, O_RDWR, 0666);
+    if(fd == -1)
+    {
+        return nullptr;
+    }
+
+    struct stat fileStatus;
+    if(fstat(fd, &fileStatus) ||
+       fileStatus.st_size != static_cast<off_t>(sizeof(T)))
+    {
+        close(fd);
+        return nullptr;
+    }
+
+    T* ret = static_cast<T*>(
+        mmap(0, sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+    close(fd);
+    if(ret == MAP_FAILED)
+    {
         return nullptr;
     }
     return ret;
@@ -138,7 +200,7 @@ static bool ThreadBind(pthread_t thread, int cpuid)
 
 static inline uint64_t RDTSC() 
 {
-    static uint32_t hi, lo;
+    uint32_t hi, lo;
     __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
     return ( (uint64_t)lo) | (((uint64_t)hi) << 32);
 }

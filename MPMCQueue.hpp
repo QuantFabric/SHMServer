@@ -1,21 +1,11 @@
 #ifndef MPMCQUEUE_HPP
 #define MPMCQUEUE_HPP
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/mman.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/types.h>
-#include <mutex>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <new>
+#include <type_traits>
 
 #ifndef force_inline
 #define force_inline __attribute__ ((__always_inline__))
@@ -47,19 +37,28 @@
 namespace SHMIPC
 {
 
-template <class T, uint32_t N> 
+template <class T, uint32_t N>
 class MPMCQueue
 {
 public:
     static_assert(N && !(N & (N - 1)), "N must be a power of 2");
+    static_assert(std::is_trivially_copyable<T>::value,
+                  "T must be trivially copyable");
+    static_assert(std::is_trivially_copy_constructible<T>::value,
+                  "T must be trivially copy constructible");
+    static_assert(std::is_trivially_copy_assignable<T>::value,
+                  "T must be trivially copy assignable");
+    static_assert(std::is_trivially_destructible<T>::value,
+                  "T must be trivially destructible");
+    static_assert(std::atomic<size_t>::is_always_lock_free,
+                  "std::atomic<size_t> must be lock-free");
+
     explicit MPMCQueue()
     {
-        m_QueueMask = N - 1;
-        m_Data = (QueueNode*)new char[sizeof(QueueNode) * N];
+        m_Data = new QueueNode[N];
         for(size_t i = 0; i < N; ++i)
         {
-            m_Data[i].tail.store(i, std::memory_order_relaxed);
-            m_Data[i].head.store(-1, std::memory_order_relaxed);
+            m_Data[i].sequence.store(FreeSequence(i), std::memory_order_relaxed);
         }
         m_Tail.store(0, std::memory_order_relaxed);
         m_Head.store(0, std::memory_order_relaxed);
@@ -67,14 +66,10 @@ public:
 
     ~MPMCQueue()
     {
-        for(size_t i = m_Head; i != m_Tail; ++i)
-        {
-            (&m_Data[i & m_QueueMask].data)->~T();
-        }
-        delete [] (char*)m_Data;
+        delete[] m_Data;
     }
 
-    size_t Capacity() const 
+    size_t Capacity() const
     {
         return N;
     }
@@ -92,17 +87,18 @@ public:
         size_t tail = m_Tail.load(std::memory_order_relaxed);
         for(;;)
         {
-            node = &m_Data[tail & m_QueueMask];
-            if(node->tail.load(std::memory_order_relaxed) != tail)
+            node = &m_Data[tail & (N - 1)];
+            if(node->sequence.load(std::memory_order_acquire) != FreeSequence(tail))
             {
                 return false;
             }
-            if((m_Tail.compare_exchange_weak(tail, tail + 1, std::memory_order_relaxed)))
+            if(m_Tail.compare_exchange_weak(tail, tail + 1, std::memory_order_relaxed))
+            {
                 break;
+            }
         }
-        new (&node->data)T(data);
-        // Update 
-        node->head.store(tail, std::memory_order_release);
+        new(&node->data) T(data);
+        node->sequence.store(ReadySequence(tail), std::memory_order_release);
         return true;
     }
 
@@ -112,17 +108,20 @@ public:
         size_t head = m_Head.load(std::memory_order_relaxed);
         for(;;)
         {
-            node = &m_Data[head & m_QueueMask];
-            if(node->head.load(std::memory_order_relaxed) != head)
+            node = &m_Data[head & (N - 1)];
+            if(node->sequence.load(std::memory_order_acquire) != ReadySequence(head))
             {
                 return false;
             }
             if(m_Head.compare_exchange_weak(head, head + 1, std::memory_order_relaxed))
+            {
                 break;
+            }
         }
-        data = node->data;
-        (&node->data)->~T();
-        node->tail.store(head + N, std::memory_order_release);
+        T* slot = std::launder(reinterpret_cast<T*>(&node->data));
+        data = *slot;
+        slot->~T();
+        node->sequence.store(FreeSequence(head + N), std::memory_order_release);
         return true;
     }
 
@@ -130,19 +129,41 @@ protected:
     MPMCQueue(const MPMCQueue& other);
     MPMCQueue& operator=(const MPMCQueue&);
 protected:
+    static constexpr size_t FreeSequence(size_t index)
+    {
+        if constexpr (N == 1)
+        {
+            return index << 1;
+        }
+        else
+        {
+            return index;
+        }
+    }
+
+    static constexpr size_t ReadySequence(size_t index)
+    {
+        if constexpr (N == 1)
+        {
+            return (index << 1) | 1;
+        }
+        else
+        {
+            return index + 1;
+        }
+    }
+
     struct alignas(64) QueueNode
     {
-        T data;
-        std::atomic<size_t> tail;
-        std::atomic<size_t> head;
+        std::aligned_storage_t<sizeof(T), alignof(T)> data;
+        std::atomic<size_t> sequence;
     };
     alignas(128) QueueNode* m_Data;
-    alignas(128) size_t m_QueueMask;
     alignas(128) std::atomic<size_t> m_Tail;
     alignas(128) std::atomic<size_t> m_Head;
 };
 
-} // naespace SHMIPC
+} // namespace SHMIPC
 
 
 #endif // MPMCQUEUE_HPP

@@ -23,22 +23,18 @@ public:
     {
         m_Channel = nullptr;
         m_AllChannel = nullptr;
+        m_SharedRegion = nullptr;
         strncpy(m_ClientName, clientName.c_str(), sizeof(m_ClientName) - 1);
         m_ClientName[sizeof(m_ClientName) - 1] = 0;
 
-        m_pSendQueue = new SPSCQueue<T, Conf::ShmQueueSize>;
-        m_pRecvQueue = new SPSCQueue<T, Conf::ShmQueueSize>;
-        m_pSendQueue->Reset();
-        m_pRecvQueue->Reset();
-
-        m_pWorkThread = nullptr;
+        m_pHeartbeatThread = nullptr;
         m_ChannelID = -1;
         m_LoginMsg.MsgType = EMsgType::EMSG_TYPE_LOGIN;
         m_HeartBeatMsg.MsgType = EMsgType::EMSG_TYPE_HEARTBEAT;
-        m_DataMsg.MsgType = EMsgType::EMSG_TYPE_DATA;
 
-        m_Stopped = false;
-        m_IsConnected = false;
+        m_Stopped.store(false, std::memory_order_relaxed);
+        m_IsConnected.store(false, std::memory_order_relaxed);
+        m_TimeStamp.store(0, std::memory_order_relaxed);
 
         // 注册信号处理函数
         auto signal_handler = [](int signal) {
@@ -68,10 +64,9 @@ public:
         Release();
     }
 
-    void Start(const std::string& ServerName, int32_t CPUID=-1)
+    void Start(const std::string& ServerName)
     {
         m_ServerName = ServerName;
-        m_CPUID = CPUID;
         if(!Connect(m_ServerName))
         {
             fprintf(stderr, "SHMConnection::Start %s connect to %s failed\n", m_ClientName, m_ServerName.c_str());
@@ -82,36 +77,46 @@ public:
         fprintf(stdout, "SHMConnection::Start %s connect to %s success by ChannelID:%d\n", m_ClientName, ServerName.c_str(), m_ChannelID);
         m_LoginMsg.ChannelID = m_ChannelID;
         m_HeartBeatMsg.ChannelID = m_ChannelID;
-        m_DataMsg.ChannelID = m_ChannelID;
         Reset();
         // 发送登录请求
-        m_Channel->SendQueue.Push(m_LoginMsg);
+        const bool loginSent = SendControlMsg(m_LoginMsg);
         fprintf(stdout, "SHMConnection::Start %s send LOGIN to %s by ChannelID:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-        while(true)
+        if(!loginSent)
         {
-            static uint64_t TimeStamp = RDTSC();
-            static TChannelMsg<T> Msg;
-            if(m_Channel->RecvQueue.Pop(Msg))
+            m_IsConnected.store(false, std::memory_order_release);
+        }
+        else
+        {
+            const uint64_t connectStart = RDTSC();
+            while(true)
             {
-                if(EMsgType::EMSG_TYPE_SERVER_ACK == Msg.MsgType)
+                TControlMsg control{};
+                if(m_Channel->ControlSendQueue.Pop(control))
                 {
-                    fprintf(stdout, "SHMConnection::Start %s recv SERVER_ACK from %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-                    Msg.MsgType = EMsgType::EMSG_TYPE_CLIENT_ACK;
-                    Msg.ChannelID = m_ChannelID;
-                    m_Channel->SendQueue.Push(Msg);
-                    m_IsConnected = true;
-                    fprintf(stdout, "SHMConnection::Start %s send CLIENT_ACK to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                    if(EMsgType::EMSG_TYPE_SERVER_ACK == control.MsgType)
+                    {
+                        fprintf(stdout, "SHMConnection::Start %s recv SERVER_ACK from %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                        control.MsgType = EMsgType::EMSG_TYPE_CLIENT_ACK;
+                        control.ChannelID = m_ChannelID;
+                        if(!SendControlMsg(control))
+                        {
+                            m_IsConnected.store(false, std::memory_order_release);
+                            break;
+                        }
+                        m_IsConnected.store(true, std::memory_order_release);
+                        fprintf(stdout, "SHMConnection::Start %s send CLIENT_ACK to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
+                        break;
+                    }
+                }
+                if(connectStart + 1e10 < RDTSC())
+                {
+                    m_IsConnected.store(false, std::memory_order_release);
                     break;
                 }
+                usleep(1000);
             }
-            if(TimeStamp + 1e10 < RDTSC())
-            {
-                m_IsConnected = false;
-                break;
-            }
-            usleep(1000);
         }
-        if(!m_IsConnected)
+        if(!m_IsConnected.load(std::memory_order_acquire))
         {
             fprintf(stderr, "SHMConnection::Start %s Connected to %s by Channel:%d failed\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
             fflush(stdout);
@@ -121,215 +126,189 @@ public:
         fprintf(stdout, "SHMConnection::Start %s Connected to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
         fflush(stdout); 
         fflush(stderr);
-        m_TimeStamp = RDTSC();
-        // 开启性能模式，开启工作线程
-        if constexpr (Conf::Performance)
+        m_TimeStamp.store(RDTSC(), std::memory_order_relaxed);
+        m_pHeartbeatThread = new std::thread(&SHMConnection::HeartbeatThreadFunc, this);
+    }
+
+    bool Push(const T& msg)
+    {
+        if(!m_Channel || !m_IsConnected.load(std::memory_order_acquire))
         {
-            m_pWorkThread = new std::thread(&SHMConnection::WorkFunc, this);
+            return false;
+        }
+
+        TDataMsg<T> dataMsg;
+        dataMsg.MsgType = EMsgType::EMSG_TYPE_DATA;
+        dataMsg.MsgID = 0;
+        dataMsg.TimeStamp = RDTSC();
+        dataMsg.ChannelID = m_ChannelID;
+        memcpy(&dataMsg.Data, &msg, sizeof(T));
+        const bool ret = m_Channel->RecvQueue.Push(dataMsg);
+        if(ret)
+        {
+            m_TimeStamp.store(dataMsg.TimeStamp, std::memory_order_relaxed);
+            fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n",
+                    m_ClientName, m_ServerName.c_str(), m_ChannelID);
         }
         else
         {
-            WorkFunc();
+            fprintf(stderr, "SHMConnection::HandleMsg %s send msg to %s failed by Channel:%d msg:%lu\n",
+                    m_ClientName, m_ServerName.c_str(), m_ChannelID, static_cast<unsigned long>(dataMsg.MsgID));
         }
-    }
-
-    bool Push(const T& msg) 
-    {
-        return m_pSendQueue->Push(msg);
+        return ret;
     }
 
     bool Pop(T& msg) 
     {
-        return m_pRecvQueue->Pop(msg);
+        if(!m_Channel || !m_IsConnected.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+
+        TDataMsg<T> dataMsg;
+        if(!m_Channel->SendQueue.Pop(dataMsg))
+        {
+            return false;
+        }
+        if(EMsgType::EMSG_TYPE_DATA != dataMsg.MsgType)
+        {
+            return false;
+        }
+        memcpy(&msg, &dataMsg.Data, sizeof(T));
+        msg.ChannelID = dataMsg.ChannelID;
+        msg.TimeStamp = dataMsg.TimeStamp;
+        m_TimeStamp.store(dataMsg.TimeStamp, std::memory_order_relaxed);
+        return true;
     }
 
     void Join()
     {
-        if(m_pWorkThread)
+        if(m_pHeartbeatThread)
         {
-            m_pWorkThread->join();
+            m_pHeartbeatThread->join();
         }
     }
 
     void Stop()
     {
-        m_Stopped = true;
+        m_Stopped.store(true, std::memory_order_release);
     }
 
     bool IsConnected() const
     {
-        return m_IsConnected;
+        return m_IsConnected.load(std::memory_order_acquire);
     }
 
-    void HandleMsg()
+protected:
+    void HandleControlMsg()
     {
-        // 发送数据
-        if(m_pSendQueue->Pop(m_DataMsg.Data))
+        // 接收控制消息
+        TControlMsg control{};
+        if(m_Channel->ControlSendQueue.Pop(control))
         {
-            if(m_Channel->SendQueue.Push(m_DataMsg))
-            {
-                // 发送消息时更新时间戳
-                m_TimeStamp = RDTSC();
-                fprintf(stdout, "SHMConnection::HandleMsg %s send msg to %s by Channel:%d\n", m_ClientName, m_ServerName.c_str(), m_ChannelID);
-            }
-            else
-            {
-                fprintf(stderr, "SHMConnection::HandleMsg %s send msg to %s failed by Channel:%d msg:%u\n", 
-                        m_ClientName, m_ServerName.c_str(), m_ChannelID, m_DataMsg.MsgID);
-            }
+            m_TimeStamp.store(RDTSC(), std::memory_order_relaxed);
         }
-        // 接收数据
-        if(m_Channel->RecvQueue.Pop(m_DataMsg))
-        {
-            m_TimeStamp = RDTSC();
-            if(EMsgType::EMSG_TYPE_DATA == m_DataMsg.MsgType)
-            {
-                if(!m_pRecvQueue->Push(m_DataMsg.Data))
-                {
-                    fprintf(stderr, "SHMConnection::HandleMsg %s recv msg failed from %s: m_pRecvQueue full\n", m_ClientName, m_ServerName.c_str());
-                }
-            }
-        } 
         // 超时发送心跳包
-        if(m_TimeStamp + Conf::Heartbeat_Interval - 50e9 < RDTSC())
+        const uint64_t timestamp = m_TimeStamp.load(std::memory_order_relaxed);
+        if(timestamp + Conf::Heartbeat_Interval - 50e9 < RDTSC())
         {
-            m_TimeStamp = RDTSC();
-            m_Channel->SendQueue.Push(m_HeartBeatMsg);
-            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, m_TimeStamp);
+            const uint64_t heartbeatTimestamp = RDTSC();
+            m_TimeStamp.store(heartbeatTimestamp, std::memory_order_relaxed);
+            m_HeartBeatMsg.TimeStamp = heartbeatTimestamp;
+            SendControlMsg(m_HeartBeatMsg);
+            fprintf(stdout, "SHMConnection::HandleMsg %s send HEARTBEAT to %s by Channel:%d %lu\n", m_ClientName, m_ServerName.c_str(), m_ChannelID, heartbeatTimestamp);
             fflush(stdout);
         }
     }
-protected:
+
     bool Connect(const std::string& ServerName)
     {
-        bool ret = false;
-        std::string shm_file = std::string("/") + ServerName + ".shm";
-        if(!m_AllChannel) 
+        if(m_AllChannel)
         {
-            if constexpr (Conf::Publish)
+            return false;
+        }
+
+        std::string shm_file = std::string("/") + ServerName + ".shm";
+        m_SharedRegion = shm_mmap_existing<SharedRegion>(shm_file.c_str());
+        if(!m_SharedRegion)
+        {
+            return false;
+        }
+
+        if(m_SharedRegion->Version.load(std::memory_order_acquire) != SharedRegion::CurrentVersion)
+        {
+            fprintf(stderr, "SHMConnection %s layout version mismatch %#X, rebuild server and client\n", m_ClientName, SharedRegion::CurrentVersion);
+            shm_munmap<SharedRegion>(m_SharedRegion, 1);
+            m_SharedRegion = nullptr;
+            return false;
+        }
+
+        m_AllChannel = m_SharedRegion->Channels;
+        bool ret = false;
+        for(uint16_t i = 0; i < SharedRegion::ChannelCapacity; i++)
+        {
+            if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
             {
-                m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::PubChannelSize);
-                if(m_AllChannel) 
-                {
-                    for(int i = 0; i < Conf::PubChannelSize; i++)
-                    {
-                        if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
-                        {
-                            m_Channel = &m_AllChannel[i];
-                            strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
-                            m_Channel->SendQueue.Reset();
-                            m_Channel->RecvQueue.Reset();
-                            m_ChannelID = m_Channel->ChannelID;
-                            ret = true;
-                            fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                    ServerName.c_str(), i, m_Channel, m_ClientName);
-                            break;
-                        }
-                        else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
-                        {
-                            m_Channel = &m_AllChannel[i];
-                            m_Channel->SendQueue.Reset();
-                            m_Channel->RecvQueue.Reset();
-                            m_ChannelID = m_Channel->ChannelID;
-                            ret = true;
-                            fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                    ServerName.c_str(), i,  m_Channel, m_ClientName);
-                            break;
-                        }
-                    }
-                    if(ret)
-                    {
-                        fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::PubChannelSize / 1024.0 / 1024.0);
-                    }
-                    else
-                    {
-                        fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
-                    }
-                }
+                m_Channel = &m_AllChannel[i];
+                strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
+                m_Channel->SendQueue.Reset();
+                m_Channel->RecvQueue.Reset();
+                m_Channel->ControlSendQueue.Reset();
+                m_Channel->ControlRecvQueue.Reset();
+                m_ChannelID = m_Channel->ChannelID;
+                ret = true;
+                fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n",
+                        ServerName.c_str(), i, static_cast<const void*>(m_Channel), m_ClientName);
+                break;
             }
-            else
+            else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0)
             {
-                m_AllChannel = shm_mmap<TChannel>(shm_file.c_str(), Conf::ChannelSize);
-                if(m_AllChannel) 
-                {
-                    for(int i = 0; i < Conf::ChannelSize; i++)
-                    {
-                        if(strnlen(m_AllChannel[i].ChannelName, sizeof(m_AllChannel[i].ChannelName)) == 0)
-                        {
-                            m_Channel = &m_AllChannel[i];
-                            strncpy(m_Channel->ChannelName, m_ClientName, sizeof(m_Channel->ChannelName) - 1);
-                            m_Channel->SendQueue.Reset();
-                            m_Channel->RecvQueue.Reset();
-                            m_ChannelID = m_Channel->ChannelID;
-                            ret = true;
-                            fprintf(stdout, "SHMConnection:%s new Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                    ServerName.c_str(), i, m_Channel, m_ClientName);
-                            break;
-                        }
-                        else if(strncmp(m_AllChannel[i].ChannelName, m_ClientName, sizeof(m_AllChannel[i].ChannelName)) == 0) 
-                        {
-                            m_Channel = &m_AllChannel[i];
-                            m_Channel->SendQueue.Reset();
-                            m_Channel->RecvQueue.Reset();
-                            m_ChannelID = m_Channel->ChannelID;
-                            ret = true;
-                            fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n", 
-                                    ServerName.c_str(), i,  m_Channel, m_ClientName);
-                            break;
-                        }
-                    }
-                    if(ret)
-                    {
-                        fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n", m_ClientName, ServerName.c_str(), sizeof(TChannel) * Conf::ChannelSize / 1024.0 / 1024.0);
-                    }
-                    else
-                    {
-                        fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
-                    }
-                }
+                m_Channel = &m_AllChannel[i];
+                m_Channel->SendQueue.Reset();
+                m_Channel->RecvQueue.Reset();
+                m_Channel->ControlSendQueue.Reset();
+                m_Channel->ControlRecvQueue.Reset();
+                m_ChannelID = m_Channel->ChannelID;
+                ret = true;
+                fprintf(stdout, "SHMConnection:%s exist Channel:%d vaddr:%p success, ClientName: %s\n",
+                        ServerName.c_str(), i, static_cast<const void*>(m_Channel), m_ClientName);
+                break;
             }
+        }
+        if(ret)
+        {
+            fprintf(stdout, "SHMConnection %s connect to %s success, %.2f MB\n",
+                    m_ClientName, ServerName.c_str(), sizeof(SharedRegion) / 1024.0 / 1024.0);
+        }
+        else
+        {
+            fprintf(stderr, "SHMConnection %s connect to %s failed\n", m_ClientName, ServerName.c_str());
         }
         return ret;
     }
 
 
-    void WorkFunc()
+    void HeartbeatThreadFunc()
     {
-        // 开启性能模式，绑定CPU
-        if constexpr (Conf::Performance)
+        while(!m_Stopped.load(std::memory_order_acquire))
         {
-            bool ret = SHMIPC::ThreadBind(pthread_self(), m_CPUID);
-            fprintf(stdout, "SHMConnection::WorkFunc bind WorkThread to CPU:%d ret=%d ClientName:%s ChannelID:%d\n", m_CPUID, ret, m_ClientName, m_ChannelID);
-            while(!m_Stopped)
-            {
-                HandleMsg();
-            }
-        }
-        else
-        {
-            HandleMsg();
+            HandleControlMsg();
         }
     }
 
     void Release() 
     {
-        if(m_AllChannel) 
+        if(m_SharedRegion)
         {
-            if constexpr (Conf::Publish)
-            {
-                shm_munmap<TChannel>(m_AllChannel, Conf::PubChannelSize);
-            }
-            else
-            {
-                shm_munmap<TChannel>(m_AllChannel, Conf::ChannelSize);
-            }
+            shm_munmap<SharedRegion>(m_SharedRegion, 1);
+            m_SharedRegion = nullptr;
             m_AllChannel = nullptr;
             m_Channel = nullptr;
         }
-        if(m_pWorkThread)
+        if(m_pHeartbeatThread)
         {
-            delete m_pWorkThread;
-            m_pWorkThread = nullptr;
+            delete m_pHeartbeatThread;
+            m_pHeartbeatThread = nullptr;
         }
     }
 
@@ -339,38 +318,37 @@ protected:
         {
             m_Channel->SendQueue.Reset();
             m_Channel->RecvQueue.Reset();
+            m_Channel->ControlSendQueue.Reset();
+            m_Channel->ControlRecvQueue.Reset();
         }
-        m_pSendQueue->Reset();
-        m_pRecvQueue->Reset();
+    }
+
+    bool SendControlMsg(const TControlMsg& control)
+    {
+        if(!m_Channel || !m_Channel->ControlRecvQueue.Push(control))
+        {
+            return false;
+        }
+        m_Channel->ControlGeneration.fetch_add(1, std::memory_order_release);
+        return true;
     }
 
 protected:
     char m_ClientName[Conf::NameSize];
     int32_t m_ChannelID;
     std::string m_ServerName;
-    using SHMQ = SPSCQueue<TChannelMsg<T>, Conf::ShmQueueSize>;
-    typedef struct
-    {
-        char ChannelName[Conf::NameSize];
-        int32_t ChannelID = -1;
-        bool IsConnected = false;
-        uint64_t TimeStamp;
-        alignas(128) SHMQ RecvQueue;
-        alignas(128) SHMQ SendQueue;
-    }TChannel;
-    TChannel* m_Channel;
-    TChannel* m_AllChannel;
+    using SharedRegion = TSharedRegion<T, Conf>;
+    using SharedChannel = TSharedChannel<T, Conf>;
+    SharedRegion* m_SharedRegion;
+    SharedChannel* m_Channel;
+    SharedChannel* m_AllChannel;
 
-    std::thread* m_pWorkThread;
-    TChannelMsg<T> m_LoginMsg;
-    TChannelMsg<T> m_HeartBeatMsg;
-    TChannelMsg<T> m_DataMsg;
-    int32_t m_CPUID;
-    volatile bool m_Stopped;
-    volatile bool m_IsConnected;
-    uint64_t m_TimeStamp;
-    SPSCQueue<T, Conf::ShmQueueSize>* m_pSendQueue;
-    SPSCQueue<T, Conf::ShmQueueSize>* m_pRecvQueue;
+    std::thread* m_pHeartbeatThread;
+    TControlMsg m_LoginMsg{};
+    TControlMsg m_HeartBeatMsg{};
+    std::atomic<bool> m_Stopped;
+    std::atomic<bool> m_IsConnected;
+    std::atomic<uint64_t> m_TimeStamp;
 };
 
 

@@ -31,7 +31,7 @@ public:
 
     void HandleMsg()
     {
-        static SHMIPC::TChannelMsg<PackMessage> Msg;
+        static SHMIPC::TDataMsg<PackMessage> Msg;
         while(true)
         {
             // 将接收客户端消息发送回客户端

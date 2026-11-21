@@ -28,6 +28,27 @@ target_link_libraries(PubServer pthread rt)
 add_executable(SHMClient SHMClient.cpp)
 target_link_libraries(SHMClient pthread rt) 
 
+add_executable(SPSCQueueTest SPSCQueueTest.cpp)
+target_link_libraries(SPSCQueueTest pthread rt)
+target_compile_options(SPSCQueueTest PRIVATE -O2)
 
+add_executable(SPSCQueueBenchmark SPSCQueueBenchmark.cpp)
+target_link_libraries(SPSCQueueBenchmark pthread rt)
+target_compile_options(SPSCQueueBenchmark PRIVATE -O3 -DNDEBUG)
 
+add_executable(MPMCQueueTest MPMCQueueTest.cpp)
+target_link_libraries(MPMCQueueTest pthread rt)
+target_compile_options(MPMCQueueTest PRIVATE -O2)
+
+add_executable(MPMCQueueBenchmark MPMCQueueBenchmark.cpp)
+target_link_libraries(MPMCQueueBenchmark pthread rt)
+target_compile_options(MPMCQueueBenchmark PRIVATE -O3 -DNDEBUG)
+
+add_executable(SHMIPCIntegrationTest SHMIPCIntegrationTest.cpp)
+target_link_libraries(SHMIPCIntegrationTest pthread rt)
+target_compile_options(SHMIPCIntegrationTest PRIVATE -O2)
+
+add_executable(SHMIPerformanceBenchmark SHMIPerformanceBenchmark.cpp)
+target_link_libraries(SHMIPerformanceBenchmark pthread rt)
+target_compile_options(SHMIPerformanceBenchmark PRIVATE -O3 -DNDEBUG)
 

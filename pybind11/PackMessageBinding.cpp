@@ -22,18 +22,18 @@ PYBIND11_MODULE(pack_message, m) {
         .value("EMSG_TYPE_HEARTBEAT", SHMIPC::EMsgType::EMSG_TYPE_HEARTBEAT)
         .export_values();
 
-    // ChannelMsg template binding
-    py::class_<SHMIPC::TChannelMsg<Message::PackMessage>>(m, "TChannelMsg")
+    // DataMsg template binding
+    py::class_<SHMIPC::TDataMsg<Message::PackMessage>>(m, "TDataMsg")
         .def(py::init<>())
-        .def_readwrite("MsgType", &SHMIPC::TChannelMsg<Message::PackMessage>::MsgType)
-        .def_readwrite("MsgID", &SHMIPC::TChannelMsg<Message::PackMessage>::MsgID)
-        .def_readwrite("TimeStamp", &SHMIPC::TChannelMsg<Message::PackMessage>::TimeStamp)
-        .def_readwrite("ChannelID", &SHMIPC::TChannelMsg<Message::PackMessage>::ChannelID)
+        .def_readwrite("MsgType", &SHMIPC::TDataMsg<Message::PackMessage>::MsgType)
+        .def_readwrite("MsgID", &SHMIPC::TDataMsg<Message::PackMessage>::MsgID)
+        .def_readwrite("TimeStamp", &SHMIPC::TDataMsg<Message::PackMessage>::TimeStamp)
+        .def_readwrite("ChannelID", &SHMIPC::TDataMsg<Message::PackMessage>::ChannelID)
         .def_property("Data",
-            [](const SHMIPC::TChannelMsg<Message::PackMessage>& self) {
+            [](const SHMIPC::TDataMsg<Message::PackMessage>& self) {
                 return self.Data;
             },
-            [](SHMIPC::TChannelMsg<Message::PackMessage>& self, const Message::PackMessage& value) {
+            [](SHMIPC::TDataMsg<Message::PackMessage>& self, const Message::PackMessage& value) {
                 self.Data = value;
             });
 

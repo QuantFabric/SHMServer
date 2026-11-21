@@ -34,7 +34,7 @@ public:
     void HandleMsg()
     {
         usleep(500*1000);// 间隔500ms
-        static SHMIPC::TChannelMsg<PackMessage> Msg;
+        static SHMIPC::TDataMsg<PackMessage> Msg;
         static uint64_t i = 0;
         // 模拟接收行情数据
         for(int j = 0; j < 100; j++)

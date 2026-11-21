@@ -21,7 +21,6 @@ def TEST_shm_connection():
     client = shm_connection.SHMConnection("188795")
     client.Start(server_name="shm_server_test")
     while not client.IsConnected():
-        client.HandleMsg()
         time.sleep(1)
         
     order = pack_message.PackMessage()
@@ -40,7 +39,6 @@ def TEST_shm_connection():
     client.Push(order)
     
     while True:
-        client.HandleMsg()
         msg = pack_message.PackMessage()
         ret = client.Pop(msg)
         if ret:

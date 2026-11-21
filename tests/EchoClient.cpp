@@ -46,9 +46,9 @@ public:
     {
     }
 
-    void Start(const std::string& ServerName, int32_t CPU0, int32_t CPU1)
+    void Start(const std::string& ServerName, int32_t CPU1)
     {
-        m_Client.Start(ServerName, CPU0);
+        m_Client.Start(ServerName);
         m_CPU = CPU1;
         m_pWorkThread = new std::thread(&EchoClient::WorkFunc, this);
         m_pWorkThread->join();
@@ -86,14 +86,14 @@ private:
 
 int main(int argc, char* argv[]) 
 {
-    if(argc < 5)
+    if(argc < 4)
     {
-        printf("Usage: %s <ClientName> <ServerName> <cpuid> <cpuid>\n", argv[0]);
+        printf("Usage: %s <ClientName> <ServerName> <cpuid>\n", argv[0]);
         return -1;
     }
     EchoClient client(argv[1]);
     uint64_t start = GetCurrentTimeNs();
-    client.Start(argv[2], std::atoi(argv[3]), std::atoi(argv[4]));
+    client.Start(argv[2], std::atoi(argv[3]));
 
     uint64_t end = GetCurrentTimeNs();
     double latency = 1.0 * (end - start) / N;
